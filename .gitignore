@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Training outputs
+logs/
+logs_parallel/
+models/
+models_parallel/
+test_experiments/
+*.zip
+
+# Optuna study databases
+*.db
+
+# Evaluation results and images
+evaluation_*.json
+evaluation_*.csv
+evaluation_*.png
+*_histogram.png
+*_boxplot.png
+*_evaluation.png
+scenario_plots/
+reports/
+*.pth
+
+# VS Code
+.vscode/
+
+# LaTeX
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+docs/*.pdf
+
+# System
+.DS_Store
+*.swp
+*.swo
+*~
