@@ -16,7 +16,7 @@ class TestScenarioGenerator:
         """Test that the generator initializes correctly."""
         generator = ScenarioGenerator(seed=42)
         assert generator.rng is not None
-        assert generator.range_bounds == (200.0, 2000.0)
+        assert generator.range_bounds == (800.0, 4200.0)
 
     def test_generate_scenario(self):
         """Test generating a single scenario."""
@@ -24,14 +24,14 @@ class TestScenarioGenerator:
         scenario = generator.generate_scenario()
 
         assert isinstance(scenario, ScenarioParameters)
-        assert 200.0 <= scenario.range_m <= 2000.0
-        assert 2.0 <= scenario.target_length <= 20.0
-        assert 2.0 <= scenario.target_width <= 20.0
-        assert 2.0 <= scenario.target_height <= 20.0
+        assert 800.0 <= scenario.range_m <= 4200.0
+        assert 8.0 <= scenario.target_length <= 12.0
+        assert 6.0 <= scenario.target_width <= 10.0
+        assert 2.5 <= scenario.target_height <= 5.5
         assert -50.0 <= scenario.target_vx <= 50.0
         assert -50.0 <= scenario.target_vy <= 50.0
-        assert -50.0 <= scenario.target_vz <= 50.0
-        assert 5.0 <= scenario.tracking_duration <= 20.0
+        assert -3.0 <= scenario.target_vz <= 3.0
+        assert 10.0 <= scenario.tracking_duration <= 15.0
         assert len(scenario.measurement_noise_std) == 3
         assert len(scenario.process_noise_std) == 3
 
@@ -123,16 +123,10 @@ class TestScenarioGenerator:
                 <= scenario.target_length
                 <= generator.target_size_bounds[1]
             )
-            assert (
-                generator.target_size_bounds[0]
-                <= scenario.target_width
-                <= generator.target_size_bounds[1]
-            )
-            assert (
-                generator.target_size_bounds[0]
-                <= scenario.target_height
-                <= generator.target_size_bounds[1]
-            )
+            # width and height are generated with separate multipliers,
+            # not directly from target_size_bounds
+            assert 6.0 <= scenario.target_width <= 10.0
+            assert 2.5 <= scenario.target_height <= 5.5
             assert (
                 generator.target_velocity_bounds[0]
                 <= scenario.target_vx

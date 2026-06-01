@@ -32,6 +32,7 @@ evaluation_*.png
 *_boxplot.png
 *_evaluation.png
 scenario_plots/
+scenario_plots_first_run/
 reports/
 *.pth
 
@@ -46,7 +47,12 @@ reports/
 *.bbl
 *.blg
 *.synctex.gz
-docs/*.pdf
+*.fdb_latexmk
+*.fls
+*.abs
+*.spl
+docs/
+
 
 # System
 .DS_Store
