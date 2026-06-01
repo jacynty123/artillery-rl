@@ -255,3 +255,324 @@ class TestArtilleryFiringEnv:
         assert np.all(np.isfinite(array))
         assert np.all(array >= 0.0)
         assert np.all(array <= 1.0)
+
+    def test_get_hp_for_step_exact_match(self):
+        """_get_hp_for_step returns the stored value when the step key exists."""
+        self.env.reset(seed=42)
+        # Overwrite the trajectory with known values
+        self.env.hp_trajectory = {0: 0.3, 5: 0.6, 10: 0.9}
+        self.env.current_state.episode_step = 0
+
+        assert self.env._get_hp_for_step(0) == 0.3
+        assert self.env._get_hp_for_step(5) == 0.6
+        assert self.env._get_hp_for_step(10) == 0.9
+
+    def test_get_hp_for_step_missing_key_interpolates(self):
+        """_get_hp_for_step falls back to convergence-adjusted base HP for a missing step.
+
+        The dead interpolation branch uses the trajectory's step-0 value and scales
+        it by a convergence factor.  We pin this behaviour before removing the branch.
+        """
+        self.env.reset(seed=42)
+        self.env.hp_trajectory = {0: 0.4, 10: 0.8}  # step 3 is absent
+        self.env.current_state.episode_step = 3
+
+        result = self.env._get_hp_for_step(3)
+
+        # The branch: base_hp = hp_trajectory[0] = 0.4
+        # elapsed_time = (3 / max_episode_steps) * tracking_duration
+        tracking_duration = self.env.current_state.scenario.tracking_duration
+        max_steps = self.env.max_episode_steps
+        elapsed = (3 / max_steps) * tracking_duration
+        convergence_factor = min(1.0, elapsed / 5.0)
+        expected = 0.4 * (0.3 + 0.7 * convergence_factor)
+
+        assert abs(result - expected) < 1e-6
+
+    def test_get_hp_for_step_no_trajectory(self):
+        """_get_hp_for_step returns 0.0 when hp_trajectory has not been initialised."""
+        self.env.reset(seed=42)
+        # Remove the attribute to simulate an uninitialised trajectory
+        if hasattr(self.env, 'hp_trajectory'):
+            del self.env.hp_trajectory
+
+        assert self.env._get_hp_for_step(5) == 0.0
+
+    def test_cache_hit_reuses_trajectory(self):
+        """Calling reset() twice with the same cache key reuses the cached trajectory.
+
+        The setup pre-populates hp_cache['__test__'] with a known trajectory (all
+        0.5) and patches _get_cache_key to always return '__test__'.  Both resets
+        must therefore land on the cache-hit branch and produce the same trajectory.
+        """
+        self.env.reset(seed=42)
+        trajectory_after_first_reset = dict(self.env.hp_trajectory)
+
+        self.env.reset(seed=42)
+        trajectory_after_second_reset = dict(self.env.hp_trajectory)
+
+        assert trajectory_after_first_reset == trajectory_after_second_reset
+        # Confirm the values come from the pre-populated cache (all 0.5)
+        for value in trajectory_after_second_reset.values():
+            assert value == 0.5
+
+    def test_cache_backward_compat_old_format(self):
+        """reset() handles old-format cache entries (plain dict, not tuple).
+
+        When hp_cache[key] is a plain dict, the backward-compat branch must copy
+        it into hp_trajectory and build cov_trajectory with default 1000.0 values.
+        """
+        # Store a plain-dict entry under the patched key
+        steps = list(range(self.env.max_episode_steps + 1))
+        old_format = {s: 0.7 for s in steps}
+        self.env.hp_cache['__test__'] = old_format  # plain dict, not tuple
+
+        self.env.reset(seed=42)
+
+        # hp_trajectory should match the plain-dict values
+        for s in steps:
+            assert self.env.hp_trajectory[s] == 0.7
+
+        # cov_trajectory should be defaulted to 1000.0 for every step
+        for s in steps:
+            assert self.env.cov_trajectory[s] == 1000.0
+
+    def test_hold_reward_tier_low_hp(self):
+        """HOLD when hp < 0.5 gives reward = hp_improvement * 5.0 - 0.1."""
+        self.env.reset(seed=42)
+        # Override step-1 HP to a value in the lowest tier
+        self.env.hp_trajectory[1] = 0.3  # was 0.5; improvement = 0.3 - 0.5 = -0.2
+
+        _, reward, _, _, _ = self.env.step(Action.HOLD)
+
+        expected = (0.3 - 0.5) * 5.0 - 0.1  # = -1.1
+        assert abs(reward - expected) < 1e-6
+
+    def test_hold_reward_tier_moderate_hp(self):
+        """HOLD when 0.5 <= hp < 0.6 gives a flat reward of -0.5."""
+        self.env.reset(seed=42)
+        # Set step-1 HP into the moderate tier (0.5 <= hp < 0.6)
+        self.env.hp_trajectory[1] = 0.55
+
+        _, reward, _, _, _ = self.env.step(Action.HOLD)
+
+        assert abs(reward - (-0.5)) < 1e-6
+
+    def test_hold_reward_tier_good_hp(self):
+        """HOLD when 0.6 <= hp < 0.7 gives a flat reward of -2.0."""
+        self.env.reset(seed=42)
+        self.env.hp_trajectory[1] = 0.65
+
+        _, reward, _, _, _ = self.env.step(Action.HOLD)
+
+        assert abs(reward - (-2.0)) < 1e-6
+
+    def test_hold_reward_tier_excellent_hp(self):
+        """HOLD when hp >= 0.7 gives hold_penalty_high * 0.5."""
+        self.env.reset(seed=42)
+        self.env.hp_trajectory[1] = 0.75
+
+        _, reward, _, _, _ = self.env.step(Action.HOLD)
+
+        expected = self.env.hold_penalty_high * 0.5  # default -10.0 * 0.5 = -5.0
+        assert abs(reward - expected) < 1e-6
+
+    def test_hold_plateau_penalty_multiplier(self):
+        """HOLD reward is multiplied by plateau_hold_multiplier when HP has plateaued.
+
+        _is_hp_plateau() requires:
+          - len(hp_history) >= hp_history_length (10)
+          - improvement_rate (recent - older) / 5 < hp_improvement_threshold (0.002)
+          - current_hp >= hp_minimum_threshold * 0.8 (0.5 * 0.8 = 0.4)
+
+        We put a flat hp_history at 0.65 (satisfies the HP floor) and step-1 HP
+        also at 0.65 (falls in the 0.6–0.7 tier → base reward = -2.0 before mult).
+        """
+        self.env.reset(seed=42)
+
+        # Fill history with a constant value so improvement_rate ≈ 0 < 0.002
+        flat_hp = 0.65
+        self.env.current_state.hp_history = [flat_hp] * self.env.hp_history_length
+        self.env.current_state.current_hit_probability = flat_hp
+        self.env.hp_trajectory[1] = flat_hp
+
+        _, reward, _, _, _ = self.env.step(Action.HOLD)
+
+        # Base tier for hp=0.65: -2.0; multiplied by plateau_hold_multiplier (5.0)
+        base = -2.0
+        expected = base * self.env.plateau_hold_multiplier
+        assert abs(reward - expected) < 1e-6
+
+    def test_timeout_penalty_when_hp_high_reached(self):
+        """A -40 timeout penalty is applied when _hp_high_reached is True at episode end.
+
+        Strategy:
+          - Reset, then read the dynamic max_episode_steps (set by _calculate_max_steps).
+          - Extend hp_trajectory to cover all steps up to max_episode_steps.
+          - Jump the env state to one step before the end, then do a single HOLD.
+          - episode_step == max_episode_steps → terminated; timeout penalty applied.
+          Expected reward for the final HOLD:
+            prev_hp = 0.5, hp[M] = 0.3 → tier hp < 0.5 → (0.3-0.5)*5 - 0.1 = -1.1
+            timeout penalty → -1.1 - 40.0 = -41.1
+        """
+        self.env.reset(seed=42)
+        M = self.env.max_episode_steps
+
+        # Extend trajectory to cover all steps (cache only covers 0-10)
+        for s in range(M + 1):
+            if s not in self.env.hp_trajectory:
+                self.env.hp_trajectory[s] = 0.5
+            if s not in self.env.cov_trajectory:
+                self.env.cov_trajectory[s] = 1000.0
+
+        # Place hp[M] below the plateau floor (0.3 < 0.4) to avoid plateau mult
+        self.env.hp_trajectory[M] = 0.3
+
+        # Jump state to one step before the end
+        self.env.current_state.episode_step = M - 1
+        time_step = self.env.current_state.scenario.tracking_duration / M
+        self.env.current_state.time_remaining = time_step  # exactly one step left
+        self.env.episode_length = M - 1
+        self.env.current_state.current_hit_probability = 0.5
+        self.env._prev_hp = 0.5
+        self.env._hp_high_reached = True
+
+        _, reward, terminated, _, _ = self.env.step(Action.HOLD)
+
+        assert terminated is True
+        expected = (0.3 - 0.5) * 5.0 - 0.1 - 40.0  # = -41.1
+        assert abs(reward - expected) < 1e-6
+
+    def test_timeout_no_penalty_when_hp_never_high(self):
+        """No -40 penalty at episode end when HP never reached the high threshold.
+
+        Same state-jump approach as test_timeout_penalty_when_hp_high_reached, but
+        _hp_high_reached is left False.  The expected reward is just the tier reward
+        with no additional subtraction.
+        """
+        self.env.reset(seed=42)
+        M = self.env.max_episode_steps
+
+        for s in range(M + 1):
+            if s not in self.env.hp_trajectory:
+                self.env.hp_trajectory[s] = 0.5
+            if s not in self.env.cov_trajectory:
+                self.env.cov_trajectory[s] = 1000.0
+
+        self.env.hp_trajectory[M] = 0.3  # below plateau floor
+
+        self.env.current_state.episode_step = M - 1
+        time_step = self.env.current_state.scenario.tracking_duration / M
+        self.env.current_state.time_remaining = time_step
+        self.env.episode_length = M - 1
+        self.env.current_state.current_hit_probability = 0.5
+        self.env._prev_hp = 0.5
+        self.env._hp_high_reached = False  # HP was never high
+
+        _, reward, terminated, _, _ = self.env.step(Action.HOLD)
+
+        assert terminated is True
+        # No timeout penalty: only the tier reward
+        expected = (0.3 - 0.5) * 5.0 - 0.1  # = -1.1
+        assert abs(reward - expected) < 1e-6
+
+    # ------------------------------------------------------------------
+    # _calculate_firing_reward — HP-band tests (all at episode_step=0 to
+    # zero out time_penalty and maximise time_efficiency = 30.0, no late
+    # penalty, no plateau / scenario bonus on a freshly-reset env)
+    # ------------------------------------------------------------------
+
+    def _fire_reward(self, hp: float) -> float:
+        """Helper: reset env, call _calculate_firing_reward at step 0."""
+        self.env.reset(seed=42)
+        return self.env._calculate_firing_reward(hp, episode_step=0)
+
+    def test_calculate_firing_reward_excellent(self):
+        """HP >= 0.7 → base=100; at step 0 total = 100 + 30 = 130."""
+        assert abs(self._fire_reward(0.75) - 130.0) < 1e-6
+
+    def test_calculate_firing_reward_good(self):
+        """0.6 <= HP < 0.7 → base=80; at step 0 total = 80 + 30 = 110."""
+        assert abs(self._fire_reward(0.65) - 110.0) < 1e-6
+
+    def test_calculate_firing_reward_minimum(self):
+        """0.5 <= HP < 0.6 → base=60; at step 0 total = 60 + 30 = 90."""
+        assert abs(self._fire_reward(0.55) - 90.0) < 1e-6
+
+    def test_calculate_firing_reward_poor(self):
+        """HP_ACCEPTABLE (0.45) <= HP < HP_MINIMUM (0.5) → base=20; total = 50."""
+        assert abs(self._fire_reward(0.47) - 50.0) < 1e-6
+
+    def test_calculate_firing_reward_failure(self):
+        """HP < HP_ACCEPTABLE (0.45) → base=-30; at step 0 total = -30 + 30 = 0."""
+        assert abs(self._fire_reward(0.3) - 0.0) < 1e-6
+
+    # ------------------------------------------------------------------
+    # _hp_high_reached flag
+    # ------------------------------------------------------------------
+
+    def test_hp_high_reached_flag_set_during_hold(self):
+        """_hp_high_reached is set to True when current hp >= 0.6 at start of a HOLD step."""
+        self.env.reset(seed=42)
+        self.env._hp_high_reached = False
+        # The flag is checked against current_hit_probability at the *start* of step()
+        self.env.current_state.current_hit_probability = 0.65  # >= 0.6 threshold
+
+        self.env.step(Action.HOLD)
+
+        assert self.env._hp_high_reached is True
+
+    def test_hp_high_reached_flag_not_set_below_threshold(self):
+        """_hp_high_reached stays False when hp < 0.6 throughout."""
+        self.env.reset(seed=42)
+        self.env._hp_high_reached = False
+        self.env.hp_trajectory[1] = 0.55  # below 0.6
+
+        self.env.step(Action.HOLD)
+
+        assert self.env._hp_high_reached is False
+
+    # ------------------------------------------------------------------
+    # _calculate_max_steps — branch coverage
+    # ------------------------------------------------------------------
+
+    def _make_scenario(self, range_m: float, target_vx: float) -> ScenarioParameters:
+        """Build a minimal ScenarioParameters for max-steps tests."""
+        noise = np.array([1.0, 1.0, 1.0])
+        return ScenarioParameters(
+            range_m=range_m,
+            target_length=5.0,
+            target_width=2.0,
+            target_height=2.0,
+            target_vx=target_vx,
+            target_vy=0.0,
+            target_vz=0.0,
+            tracking_duration=10.0,
+            measurement_noise_std=noise,
+            process_noise_std=noise,
+        )
+
+    def test_calculate_max_steps_fast_approach_long(self):
+        """range≈3000, vx<-40 → 25 (Fast_Approach_Long mini-episode)."""
+        s = self._make_scenario(range_m=3000.0, target_vx=-50.0)
+        assert self.env._calculate_max_steps(s) == 25
+
+    def test_calculate_max_steps_very_fast_approach(self):
+        """range≈4000, vx<-70 → 40 (Very_Fast_Approach)."""
+        s = self._make_scenario(range_m=4000.0, target_vx=-80.0)
+        assert self.env._calculate_max_steps(s) == 40
+
+    def test_calculate_max_steps_long_range(self):
+        """range > 3000 (and not fast-approach) → 100."""
+        s = self._make_scenario(range_m=4500.0, target_vx=0.0)
+        assert self.env._calculate_max_steps(s) == 100
+
+    def test_calculate_max_steps_medium_range(self):
+        """2500 < range <= 3000 (not fast-approach) → 90."""
+        s = self._make_scenario(range_m=2600.0, target_vx=0.0)
+        assert self.env._calculate_max_steps(s) == 90
+
+    def test_calculate_max_steps_default(self):
+        """range <= 2500 → 40 (default)."""
+        s = self._make_scenario(range_m=1000.0, target_vx=0.0)
+        assert self.env._calculate_max_steps(s) == 40
