@@ -143,6 +143,23 @@ def get_static_scenario():
         process_noise_std=np.array([0.1, 0.1, 0.1])
     )
 
+def hp_worker(args):
+    env_state, scenario, step, max_episode_steps, calculate_hp_func = args
+    # Simulate state at this step
+    time_remaining = scenario.tracking_duration * (1.0 - step / max_episode_steps)
+    # Temporarily set state for HP calculation
+    old_time = env_state.time_remaining
+    old_step = env_state.episode_step
+    env_state.time_remaining = time_remaining
+    env_state.episode_step = step
+    hp_value = calculate_hp_func(scenario)
+    cov_trace = getattr(env_state, 'covariance_trace', 1000.0)
+    # Restore state
+    env_state.time_remaining = old_time
+    env_state.episode_step = old_step
+    return (step, hp_value, cov_trace)
+
+
 class ArtilleryFiringEnv(gym.Env):
     """
     OpenAI Gym environment for artillery firing decision training.
@@ -150,23 +167,6 @@ class ArtilleryFiringEnv(gym.Env):
     The agent must decide whether to fire immediately or hold for better
     conditions, maximizing expected reward based on hit probability.
     """
-
-    @staticmethod
-    def hp_worker(args):
-        env_state, scenario, step, max_episode_steps, calculate_hp_func = args
-        # Simulate state at this step
-        time_remaining = scenario.tracking_duration * (1.0 - step / max_episode_steps)
-        # Temporarily set state for HP calculation
-        old_time = env_state.time_remaining
-        old_step = env_state.episode_step
-        env_state.time_remaining = time_remaining
-        env_state.episode_step = step
-        hp_value = calculate_hp_func(scenario)
-        cov_trace = getattr(env_state, 'covariance_trace', 1000.0)
-        # Restore state
-        env_state.time_remaining = old_time
-        env_state.episode_step = old_step
-        return (step, hp_value, cov_trace)
 
     def __init__(
         self,
@@ -377,7 +377,7 @@ class ArtilleryFiringEnv(gym.Env):
                 for step in steps
             ]
             with concurrent.futures.ProcessPoolExecutor() as executor:
-                results = list(executor.map(self.hp_worker, worker_args))
+                results = list(executor.map(hp_worker, worker_args))
             for step, hp_value, cov_trace in results:
                 self.hp_trajectory[step] = hp_value
                 self.cov_trajectory[step] = cov_trace
@@ -514,49 +514,23 @@ class ArtilleryFiringEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def _get_hp_for_step(self, step: int) -> float:
-        """
-        Get hit probability for given step using pre-calculated trajectory.
-        Uses linear interpolation between sampled points for accuracy.
-        """
+        """Get hit probability for given step using pre-calculated trajectory."""
         if not hasattr(self, 'hp_trajectory'):
-            # Fallback if trajectory not initialized
             return 0.0
-        
-        # If exact match exists, return it
+
         if step in self.hp_trajectory:
             return self.hp_trajectory[step]
-        
-        # Find surrounding points for interpolation
-        steps_sorted = sorted(self.hp_trajectory.keys())
-        
-        # Find bracketing steps
-        lower_step = max([s for s in steps_sorted if s <= step], default=0)
-        upper_step = min([s for s in steps_sorted if s >= step], default=max(steps_sorted))
-        
-        if lower_step == upper_step:
-            return self.hp_trajectory[lower_step]
-        
-        # Calculate elapsed time for this step
+
+        # Step not in trajectory — apply Kalman convergence factor
         if self.current_state is not None:
             scenario = self.current_state.scenario
-            max_steps = self.max_episode_steps
-            elapsed_time = (step / max_steps) * scenario.tracking_duration
+            elapsed_time = (step / self.max_episode_steps) * scenario.tracking_duration
         else:
-            # Fallback: assume uniform progression
-            elapsed_time = step * 0.2  # Assume 0.2s per step
+            elapsed_time = step * 0.2
 
-        # Get base HP (existing calculation)
-        if hasattr(self, 'hp_trajectory') and step in self.hp_trajectory:
-            base_hp = self.hp_trajectory[step]
-        elif hasattr(self, 'hp_trajectory') and 0 in self.hp_trajectory:
-            base_hp = self.hp_trajectory[0]
-        else:
-            base_hp = 0.05
-
-        # CRITICAL: Make HP depend on elapsed time (Kalman filter convergence)
-        convergence_factor = min(1.0, elapsed_time / 5.0)  # HP improves over first 5 seconds
-        improved_hp = base_hp * (0.3 + 0.7 * convergence_factor)  # HP improves from 30% to 100% of base
-        return improved_hp
+        base_hp = self.hp_trajectory.get(0, 0.05)
+        convergence_factor = min(1.0, elapsed_time / 5.0)
+        return base_hp * (0.3 + 0.7 * convergence_factor)
     
     def _calculate_hit_probability(self, scenario: ScenarioParameters, debug: bool = False):
         """

@@ -239,50 +239,49 @@ if __name__ == "__main__":
     print("=" * 80)
     print("DQN CURRICULUM LEARNING")
     print("=" * 80)
-    
+
     import argparse
     import json
 
-    if __name__ == "__main__":
-        parser = argparse.ArgumentParser(description="DQN Curriculum Training")
-        parser.add_argument("--start_phase", type=int, default=1, help="First curriculum phase to train (1-4)")
-        parser.add_argument("--end_phase", type=int, default=3, help="Last curriculum phase to train (1-4)")
-        parser.add_argument("--timesteps", type=int, default=10000, help="Total training timesteps per phase")
-        parser.add_argument("--config", type=str, help="JSON config file for parameter overrides")
-        args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="DQN Curriculum Training")
+    parser.add_argument("--start_phase", type=int, default=1, help="First curriculum phase to train (1-4)")
+    parser.add_argument("--end_phase", type=int, default=3, help="Last curriculum phase to train (1-4)")
+    parser.add_argument("--timesteps", type=int, default=10000, help="Total training timesteps per phase")
+    parser.add_argument("--config", type=str, help="JSON config file for parameter overrides")
+    args = parser.parse_args()
 
-        # Load config if provided
-        config = {}
-        if args.config:
-            with open(args.config, 'r') as f:
-                config = json.load(f)
+    # Load config if provided
+    config = {}
+    if args.config:
+        with open(args.config, 'r') as f:
+            config = json.load(f)
 
-        prev_checkpoint = None
-        for phase in range(args.start_phase, args.end_phase + 1):
-            print(f"\n\nSTARTING PHASE {phase}: Curriculum Training")
-            print("=" * 80)
-            q_network, results = train_curriculum_phase(
-                phase=phase,
-                total_timesteps=args.timesteps,
-                eval_interval=config.get("eval_interval", 100),
-                epsilon_decay_steps=config.get("epsilon_decay_steps", 2000),
-                firing_reward_high=config.get("firing_reward_high", 100.0),
-                time_penalty_factor=config.get("time_penalty_factor", -100.0),
-                hold_penalty_high=config.get("hold_penalty_high", -10.0),
-                reward_excellent=config.get("reward_excellent", 100.0),
-                reward_good=config.get("reward_good", 80.0),
-                reward_minimum=config.get("reward_minimum", 60.0),
-                reward_fair=config.get("reward_fair", 40.0),
-                reward_poor=config.get("reward_poor", 20.0),
-                reward_failure=config.get("reward_failure", -30.0),
-                hold_penalty_base=config.get("hold_penalty_base", -10.0),
-                opportunity_cost_excellent=config.get("opportunity_cost_excellent", -30.0),
-                opportunity_cost_good=config.get("opportunity_cost_good", -15.0),
-                opportunity_cost_minimum=config.get("opportunity_cost_minimum", -8.0),
-                load_from=prev_checkpoint
-            )
-            prev_checkpoint = str(Path(__file__).parent.parent / "models" / "checkpoints" / f"dqn_curriculum_phase{phase}.pth")
-
-        print("\n" + "=" * 80)
-        print("CURRICULUM LEARNING COMPLETE!")
+    prev_checkpoint = None
+    for phase in range(args.start_phase, args.end_phase + 1):
+        print(f"\n\nSTARTING PHASE {phase}: Curriculum Training")
         print("=" * 80)
+        q_network, results = train_curriculum_phase(
+            phase=phase,
+            total_timesteps=args.timesteps,
+            eval_interval=config.get("eval_interval", 100),
+            epsilon_decay_steps=config.get("epsilon_decay_steps", 2000),
+            firing_reward_high=config.get("firing_reward_high", 100.0),
+            time_penalty_factor=config.get("time_penalty_factor", -100.0),
+            hold_penalty_high=config.get("hold_penalty_high", -10.0),
+            reward_excellent=config.get("reward_excellent", 100.0),
+            reward_good=config.get("reward_good", 80.0),
+            reward_minimum=config.get("reward_minimum", 60.0),
+            reward_fair=config.get("reward_fair", 40.0),
+            reward_poor=config.get("reward_poor", 20.0),
+            reward_failure=config.get("reward_failure", -30.0),
+            hold_penalty_base=config.get("hold_penalty_base", -10.0),
+            opportunity_cost_excellent=config.get("opportunity_cost_excellent", -30.0),
+            opportunity_cost_good=config.get("opportunity_cost_good", -15.0),
+            opportunity_cost_minimum=config.get("opportunity_cost_minimum", -8.0),
+            load_from=prev_checkpoint
+        )
+        prev_checkpoint = str(Path(__file__).parent.parent / "models" / "checkpoints" / f"dqn_curriculum_phase{phase}.pth")
+
+    print("\n" + "=" * 80)
+    print("CURRICULUM LEARNING COMPLETE!")
+    print("=" * 80)

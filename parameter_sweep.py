@@ -90,6 +90,7 @@ def run_training(epsilon_decay_steps, firing_reward_high, time_penalty_factor, h
 
 def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study_name="dqn_reward_optimization"):
     """Run comprehensive Optuna optimization focused on reward parameters."""
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     # Create study with persistent storage
     study = optuna.create_study(
@@ -131,7 +132,7 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
         if result["success"]:
             # Enhanced scoring for reward optimization
             hp_score = result["avg_hp"] * 10  # Weight HP heavily
-            timing_score = -0.05 * (result["avg_steps"] - 20)  # Penalize late firing
+            timing_score = -0.05 * ((result["avg_steps"] or 0) - 20)  # Penalize late firing
             consistency_score = -0.05 * result["hp_std"]  # Penalize inconsistency
             score = hp_score + timing_score + consistency_score
             return score
@@ -165,7 +166,7 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
     # Print optimization statistics
     print(f"\nOptimization Statistics:")
     print(f"Total trials: {len(study.trials)}")
-    completed_trials = [t for t in study.trials if t.value != -100.0]
+    completed_trials = [t for t in study.trials if t.value is not None and t.value != -100.0]
     print(f"Completed trials: {len(completed_trials)}")
     if completed_trials:
         scores = [t.value for t in completed_trials]
@@ -245,7 +246,7 @@ def run_grid_search():
                                              100.0, 80.0, 60.0, 40.0, 20.0, -30.0, -10.0, -30.0, -15.0, -8.0)
 
                         if result["success"]:
-                            score = result["avg_hp"] - 0.1 * (result["avg_steps"] - 20) - 0.1 * result["hp_std"]
+                            score = result["avg_hp"] - 0.1 * ((result["avg_steps"] or 0) - 20) - 0.1 * result["hp_std"]
                             results.append({
                                 "params": {
                                     "epsilon_decay_steps": eps_decay,
@@ -315,6 +316,7 @@ def run_grid_search():
 
 def run_general_optuna(n_trials=50, timesteps_per_trial=5000, study_name="dqn_general_optimization"):
     """Run general Optuna optimization over all hyperparameters."""
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
     print(f"Starting general Optuna optimization with {n_trials} trials...")
 
     # Create study
@@ -368,7 +370,7 @@ def objective(trial):
 
     if result["success"]:
         # Calculate score (higher is better)
-        score = result["avg_hp"] - 0.1 * (result["avg_steps"] - 20) - 0.1 * result["hp_std"]
+        score = result["avg_hp"] - 0.1 * ((result["avg_steps"] or 0) - 20) - 0.1 * result["hp_std"]
         return score
     else:
         # Return very low score for failed runs

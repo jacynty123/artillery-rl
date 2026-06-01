@@ -147,42 +147,6 @@ def plot_trajectory_results(results, save_path=None):
         ax.set_ylim(0, 1.0)
 
     # Covariance Trace vs Time
-    ax_cov_time = fig.add_gridspec(2, 3, hspace=0.3, wspace=0.3)
-
-    # HP trace plots (first 4 scenarios)
-    hp_axes = []
-    for i in range(4):
-        row, col = i // 2, i % 2
-        ax = fig.add_subplot(gs[row, col])
-        hp_axes.append(ax)
-
-    colors = ['blue', 'red', 'green', 'orange']
-
-    for i, result in enumerate(results[:4]):  # Plot first 4 trajectories
-        ax = hp_axes[i]
-
-        # Plot HP trace
-        steps = range(len(result['hp_trace']))
-        ax.plot(steps, result['hp_trace'], 'b-', linewidth=2, label='Hit Probability')
-
-        # Mark firing decision
-        if result['fired_at_step'] is not None:
-            fire_step = result['fired_at_step']
-            fire_hp = result['hp_trace'][fire_step]
-            ax.scatter(fire_step, fire_hp, color='red', s=100, marker='x',
-                      linewidth=3, label=f'FIRE (HP={fire_hp:.3f})')
-
-        # Add scenario info
-        ax.set_title(f"{result['scenario_name']}\nRange: {result['initial_range']:.0f}m")
-        ax.set_xlabel('Time Step')
-        ax.set_ylabel('Hit Probability')
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-
-        # Set reasonable y-axis limits
-        ax.set_ylim(0, 1.0)
-
-    # Covariance Trace vs Time
     ax_cov_time = fig.add_subplot(gs[:, 2])
     for i, result in enumerate(results):
         if 'cov_traces' in result and result['cov_traces']:
