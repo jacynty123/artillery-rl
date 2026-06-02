@@ -383,7 +383,7 @@ class ArtilleryFiringEnv(gym.Env):
                 self.cov_trajectory[step] = cov_trace
             # Cache for future use
             self.hp_cache[cache_key] = (self.hp_trajectory.copy(), self.cov_trajectory.copy())
-            print(f"Cache MISS → computed {scenario.name}")
+            print(f"Cache MISS -> computed {scenario.name}")
         # Set initial values
         initial_hit_prob = self.hp_trajectory[0]
         self.current_state.current_hit_probability = initial_hit_prob

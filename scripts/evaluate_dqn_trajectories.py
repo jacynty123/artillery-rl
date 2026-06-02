@@ -319,13 +319,14 @@ def main(num_runs: int = 1):
     action_dim = env.action_space.n
 
     # Load the trained model (Phase 4)
-    model_path = Path("rl_training/models/checkpoints/dqn_curriculum_phase4.pth")
+    ROOT = Path(__file__).parent.parent
+    model_path = ROOT / "rl_training/models/checkpoints/dqn_curriculum_phase4.pth"
     try:
         q_network = load_dqn_model(model_path, state_dim, action_dim, device)
     except FileNotFoundError:
         print(f"Model not found at {model_path}")
         print("Available checkpoints:")
-        checkpoints_dir = Path("rl_training/models/checkpoints")
+        checkpoints_dir = ROOT / "rl_training/models/checkpoints"
         if checkpoints_dir.exists():
             for f in checkpoints_dir.glob("*.pth"):
                 print(f"  {f.name}")
@@ -448,16 +449,20 @@ def main(num_runs: int = 1):
         print("robust policy. For out-of-distribution generalization, held-out scenario")
         print("families would be required (Cobbe et al., 2019; Packer et al., 2018).")
 
-        stats.to_csv("evaluation_summary_multiple_runs.csv", index=False)
-        print("\nPer-run statistics saved to evaluation_summary_multiple_runs.csv")
+        results_dir = ROOT / "results"
+        results_dir.mkdir(exist_ok=True)
+        stats.to_csv(results_dir / "evaluation_summary_multiple_runs.csv", index=False)
+        print(f"\nPer-run statistics saved to {results_dir / 'evaluation_summary_multiple_runs.csv'}")
 
     # Save flat CSV with all individual results
-    df_all.to_csv("evaluation_summary.csv", index=False)
-    print("All results saved to evaluation_summary.csv")
+    results_dir = ROOT / "results"
+    results_dir.mkdir(exist_ok=True)
+    df_all.to_csv(results_dir / "evaluation_summary.csv", index=False)
+    print(f"All results saved to {results_dir / 'evaluation_summary.csv'}")
 
     # Plots based on last run
-    plot_trajectory_results(last_results, save_path="trajectory_evaluation.png")
-    plot_individual_scenarios(last_results, plots_dir="scenario_plots")
+    plot_trajectory_results(last_results, save_path=str(results_dir / "trajectory_evaluation.png"))
+    plot_individual_scenarios(last_results, plots_dir=str(results_dir / "scenario_plots"))
 
     print("\n🎯 Evaluation complete!")
     print("📊 Trajectory plots saved to: trajectory_evaluation.png")

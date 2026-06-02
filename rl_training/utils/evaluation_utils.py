@@ -84,11 +84,11 @@ def evaluate_curriculum(env, q_network, curriculum, device, verbose=True):
 
         if verbose:
             difficulty = curriculum.difficulty[scenario.name]
-            safety = "✓" if stats['range_safe'] else "✗ UNSAFE"
+            safety = "[OK]" if stats['range_safe'] else "[UNSAFE]"
             print(f"{i+1}. {scenario.name:30s} [{difficulty:4s}] | "
-                f"HP={stats['hp']:.3f}±{stats['hp_std']:.3f} | "
+                f"HP={stats['hp']:.3f}+/-{stats['hp_std']:.3f} | "
                 f"Steps={stats['steps']:.1f} | "
-                f"FiringStep={stats['firing_step']:.1f}±{stats['firing_step_std']:.1f} | "
+                f"FiringStep={stats['firing_step']:.1f}+/-{stats['firing_step_std']:.1f} | "
                 f"Range={stats['firing_range']:.0f}m {safety}")
 
     # Summary statistics
@@ -134,20 +134,20 @@ def check_phase_completion(curriculum, eval_results):
     print("PHASE COMPLETION CHECK")
     print("=" * 80)
     print(f"Phase {curriculum.phase}: {requirements['description']}")
-    print(f"  Average HP >= {requirements['min_avg_hp']:.2f}: {avg_hp:.3f} {'✓' if meets_avg else '✗'}")
-    print(f"  Min HP >= {requirements['min_hp_per_scenario']:.2f}: {min_hp:.3f} {'✓' if meets_min else '✗'}")
-    print(f"  All ranges safe: {'✓' if all_safe else '✗'}")
-    print(f"  Timing efficiency (avg step ≤ {timing_target:.0f}): {avg_firing_step:.1f} {'✓' if timing_efficient else '✗'}")
+    print(f"  Average HP >= {requirements['min_avg_hp']:.2f}: {avg_hp:.3f} {'[OK]' if meets_avg else '[FAIL]'}")
+    print(f"  Min HP >= {requirements['min_hp_per_scenario']:.2f}: {min_hp:.3f} {'[OK]' if meets_min else '[FAIL]'}")
+    print(f"  All ranges safe: {'[OK]' if all_safe else '[FAIL]'}")
+    print(f"  Timing efficiency (avg step <= {timing_target:.0f}): {avg_firing_step:.1f} {'[OK]' if timing_efficient else '[FAIL]'}")
 
     complete = meets_avg and meets_min and all_safe and timing_efficient
 
     if complete:
-        print(f"\n✓ PHASE {curriculum.phase} COMPLETE!")
+        print(f"\n[OK] PHASE {curriculum.phase} COMPLETE!")
     else:
         if not timing_efficient:
-            print(f"\n⚠ Timing too slow - fire earlier! (current: {avg_firing_step:.1f}, target: ≤{timing_target:.0f})")
+            print(f"\n[WARN] Timing too slow - fire earlier! (current: {avg_firing_step:.1f}, target: <={timing_target:.0f})")
         else:
-            print(f"\n⚠ Phase {curriculum.phase} not yet complete - continue training")
+            print(f"\n[WARN] Phase {curriculum.phase} not yet complete - continue training")
 
     print("=" * 80)
 

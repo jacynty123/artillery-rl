@@ -8,10 +8,18 @@ Supports both grid search and Optuna Bayesian optimization.
 import subprocess
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import optuna
 import argparse
+
+# Project root is one level up from this scripts/ folder
+ROOT = Path(__file__).parent.parent
+CONFIG_DIR = ROOT / "config"
+RESULTS_DIR = ROOT / "results"
+CONFIG_DIR.mkdir(exist_ok=True)
+RESULTS_DIR.mkdir(exist_ok=True)
 
 # Add imports for statistics and plotting
 import pandas as pd
@@ -49,13 +57,13 @@ def run_training(epsilon_decay_steps, firing_reward_high, time_penalty_factor, h
     try:
         # Run the training script with modified parameters
         cmd = [
-            "python", "-m", "rl_training.train.train_dqn_curriculum",
+            sys.executable, "-m", "rl_training.train.train_dqn_curriculum",
             "--start_phase", "1", "--end_phase", "1", 
             "--timesteps", str(timesteps),
             "--config", config_file
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path(__file__).parent))
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT))
         
         # Parse the output for evaluation results
         lines = result.stdout.split('\n')
@@ -93,10 +101,11 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     # Create study with persistent storage
+    db_path = CONFIG_DIR / f"{study_name}.db"
     study = optuna.create_study(
         direction='maximize',
         study_name=study_name,
-        storage=f'sqlite:///{study_name}.db',
+        storage=f'sqlite:///{db_path}',
         load_if_exists=True
     )
 
@@ -158,7 +167,7 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
         print(f"  {key}: {value}")
 
     # Save best parameters
-    best_params_file = f"best_{study_name}_params.json"
+    best_params_file = CONFIG_DIR / f"best_{study_name}_params.json"
     with open(best_params_file, 'w') as f:
         json.dump(study.best_params, f, indent=2)
     print(f"\nBest parameters saved to {best_params_file}")
@@ -180,18 +189,21 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
 
         # Parameter importance
         fig = optuna.visualization.plot_param_importances(study)
-        fig.write_html(f"{study_name}_param_importances.html")
-        print(f"Parameter importance plot saved to {study_name}_param_importances.html")
+        out1 = CONFIG_DIR / f"{study_name}_param_importances.html"
+        fig.write_html(str(out1))
+        print(f"Parameter importance plot saved to {out1}")
 
         # Optimization history
         fig2 = optuna.visualization.plot_optimization_history(study)
-        fig2.write_html(f"{study_name}_optimization_history.html")
-        print(f"Optimization history plot saved to {study_name}_optimization_history.html")
+        out2 = CONFIG_DIR / f"{study_name}_optimization_history.html"
+        fig2.write_html(str(out2))
+        print(f"Optimization history plot saved to {out2}")
 
         # Parallel coordinate plot
         fig3 = optuna.visualization.plot_parallel_coordinate(study)
-        fig3.write_html(f"{study_name}_parallel_coordinate.html")
-        print(f"Parallel coordinate plot saved to {study_name}_parallel_coordinate.html")
+        out3 = CONFIG_DIR / f"{study_name}_parallel_coordinate.html"
+        fig3.write_html(str(out3))
+        print(f"Parallel coordinate plot saved to {out3}")
 
     except ImportError:
         print("Install plotly for visualizations: pip install plotly")
@@ -287,8 +299,9 @@ def run_grid_search():
     print(f"Best Score: {df_full['score'].max():.3f}")
 
     # Save tabular summary to CSV
-    df_full.to_csv("parameter_sweep_results.csv", index=False)
-    print("Tabular results saved to parameter_sweep_results.csv")
+    csv_out = RESULTS_DIR / "parameter_sweep_results.csv"
+    df_full.to_csv(csv_out, index=False)
+    print(f"Tabular results saved to {csv_out}")
 
     # Plotting
     plt.figure(figsize=(10,6))
@@ -299,8 +312,9 @@ def run_grid_search():
     plt.title('Parameter Sweep: Score vs. Hit Probability')
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig('parameter_sweep_scatter.png', dpi=200)
-    print("Figure saved to parameter_sweep_scatter.png")
+    scatter_out = RESULTS_DIR / 'parameter_sweep_scatter.png'
+    plt.savefig(scatter_out, dpi=200)
+    print(f"Figure saved to {scatter_out}")
 
     # Bar plot for top 10
     top10 = df_full.head(10)
@@ -310,8 +324,9 @@ def run_grid_search():
     plt.ylabel('Average Hit Probability')
     plt.title('Top 10 Parameter Sets by HP')
     plt.tight_layout()
-    plt.savefig('parameter_sweep_top10_bar.png', dpi=200)
-    print("Bar plot saved to parameter_sweep_top10_bar.png")
+    bar_out = RESULTS_DIR / 'parameter_sweep_top10_bar.png'
+    plt.savefig(bar_out, dpi=200)
+    print(f"Bar plot saved to {bar_out}")
 
 
 def run_general_optuna(n_trials=50, timesteps_per_trial=5000, study_name="dqn_general_optimization"):
@@ -320,10 +335,11 @@ def run_general_optuna(n_trials=50, timesteps_per_trial=5000, study_name="dqn_ge
     print(f"Starting general Optuna optimization with {n_trials} trials...")
 
     # Create study
+    db_path = CONFIG_DIR / f"{study_name}.db"
     study = optuna.create_study(
         direction='maximize',
         study_name=study_name,
-        storage=f'sqlite:///{study_name}.db',
+        storage=f'sqlite:///{db_path}',
         load_if_exists=True
     )
 
@@ -336,7 +352,7 @@ def run_general_optuna(n_trials=50, timesteps_per_trial=5000, study_name="dqn_ge
     print(f"Best parameters: {study.best_params}")
 
     # Save best parameters
-    best_params_file = f"best_{study_name}_params.json"
+    best_params_file = CONFIG_DIR / f"best_{study_name}_params.json"
     with open(best_params_file, 'w') as f:
         json.dump(study.best_params, f, indent=2)
     print(f"Best parameters saved to {best_params_file}")

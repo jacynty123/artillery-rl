@@ -8,6 +8,9 @@ to hit probability calculation with dynamic covariance estimates.
 
 import numpy as np
 import pytest
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from hit_probability_scenarios import create_scenario, analyze_scenario, compute_dynamic_target_covariance
 from src.kalman_filter import TargetKalmanFilter, MeasurementType
 

@@ -67,24 +67,24 @@ Run Optuna-based hyperparameter optimization to find the best reward structure a
 
 ```bash
 # Run comprehensive reward parameter optimization (50 trials)
-python parameter_sweep.py --mode reward_optuna --trials 50 --timesteps 10000 --study_name dqn_reward_optimization
+python scripts/parameter_sweep.py --mode reward_optuna --trials 50 --timesteps 10000 --study_name dqn_reward_optimization
 
 # Faster exploration with fewer trials
-python parameter_sweep.py --mode reward_optuna --trials 20 --timesteps 5000
+python scripts/parameter_sweep.py --mode reward_optuna --trials 20 --timesteps 5000
 
 # Alternative: General hyperparameter optimization
-python parameter_sweep.py --mode optuna --trials 50 --timesteps 5000
+python scripts/parameter_sweep.py --mode optuna --trials 50 --timesteps 5000
 
 # Traditional grid search (slower but exhaustive)
-python parameter_sweep.py --mode grid
+python scripts/parameter_sweep.py --mode grid
 ```
 
 **Outputs:**
-- `best_dqn_reward_optimization_params.json` - Best parameters found
-- `dqn_reward_optimization.db` - Optuna study database
-- `*_param_importances.html` - Parameter importance visualization
-- `*_optimization_history.html` - Optimization progress
-- `*_parallel_coordinate.html` - Parameter interactions
+- `config/best_dqn_reward_optimization_params.json` - Best parameters found
+- `config/dqn_reward_optimization.db` - Optuna study database
+- `config/*_param_importances.html` - Parameter importance visualization
+- `config/*_optimization_history.html` - Optimization progress
+- `config/*_parallel_coordinate.html` - Parameter interactions
 
 ### Step 3: Train DQN Agent with Curriculum Learning
 
@@ -96,14 +96,14 @@ python -m rl_training.train.train_dqn_curriculum \
     --start_phase 1 \
     --end_phase 4 \
     --timesteps 15000 \
-    --config best_dqn_reward_optimization_params.json
+    --config config/best_dqn_reward_optimization_params.json
 
 # Train specific phases (e.g., only Phase 1-2)
 python -m rl_training.train.train_dqn_curriculum \
     --start_phase 1 \
     --end_phase 2 \
     --timesteps 15000 \
-    --config best_params_optuna.json
+    --config config/best_params_optuna.json
 
 # Train without config file (uses default parameters)
 python -m rl_training.train.train_dqn_curriculum \
@@ -129,15 +129,13 @@ python -m rl_training.train.train_dqn_curriculum \
 Evaluate the trained DQN agent on diverse trajectory scenarios and generate comprehensive statistics:
 
 ```bash
-python evaluate_dqn_trajectories.py
+python scripts/evaluate_dqn_trajectories.py
 ```
 
 **Outputs:**
-- `trajectory_evaluation.png` - Hit probability traces and 3D trajectories
-- `evaluation_summary.csv` - Tabular summary of all scenarios
-- `hp_histogram.png` - Distribution of final hit probabilities
-- `hp_boxplot.png` - Boxplot of hit probability performance
-- `firing_step_histogram.png` - Distribution of firing decision timing
+- `results/trajectory_evaluation.png` - Hit probability traces and 3D trajectories
+- `results/evaluation_summary.csv` - Tabular summary of all scenarios
+- `results/scenario_plots/` - Per-scenario plots
 - Console output with detailed statistics (mean, std, median, min, max HP)
 
 ### Complete Example Workflow
@@ -147,20 +145,20 @@ python evaluate_dqn_trajectories.py
 source .venv/bin/activate
 
 # 2. Run hyperparameter optimization (can run in background)
-python parameter_sweep.py --mode reward_optuna --trials 30 --timesteps 8000
+python scripts/parameter_sweep.py --mode reward_optuna --trials 30 --timesteps 8000
 
 # 3. Train with best parameters found
 python -m rl_training.train.train_dqn_curriculum \
     --start_phase 1 \
     --end_phase 4 \
     --timesteps 15000 \
-    --config best_dqn_reward_optimization_params.json
+    --config config/best_dqn_reward_optimization_params.json
 
 # 4. Evaluate the trained model
-python evaluate_dqn_trajectories.py
+python scripts/evaluate_dqn_trajectories.py
 
 # 5. Review results
-ls -lh *.png *.csv *.html  # Check generated figures and summaries
+ls -lh results/ reports/
 ```
 
 ### Expected Results
@@ -182,12 +180,12 @@ Create comprehensive evaluation reports with statistics and plots:
 ```bash
 source .venv/bin/activate
 
-# Generate markdown report and plots (requires evaluation_summary.csv)
-python generate_training_summary.py
+# Generate markdown report and plots (requires results/evaluation_summary.csv)
+python scripts/generate_training_summary.py
 ```
 
 **Prerequisites:**
-- Run `evaluate_dqn_trajectories.py` first to generate `evaluation_summary.csv`
+- Run `scripts/evaluate_dqn_trajectories.py` first to generate `results/evaluation_summary.csv`
 
 **Outputs:**
 - `reports/training_summary.md` - Markdown report with metrics and analysis
@@ -204,12 +202,12 @@ Create detailed LaTeX documentation of evaluation results:
 ```bash
 source .venv/bin/activate
 
-# Generate LaTeX report (requires evaluation_details.json)
-python generate_training_summary_tex.py
+# Generate LaTeX report (requires results/evaluation_details.json)
+python scripts/generate_training_summary_tex.py
 ```
 
 **Prerequisites:**
-- Run `evaluate_dqn_trajectories.py` first to generate `evaluation_details.json`
+- Run `scripts/evaluate_dqn_trajectories.py` first to generate `results/evaluation_details.json`
 
 **Outputs:**
 - `reports/training_summary.tex` - LaTeX report with per-scenario analysis
@@ -223,7 +221,7 @@ Run hit probability analysis for multiple engagement scenarios with different ra
 source .venv/bin/activate
 
 # Run scenario analysis with dynamic covariance
-python hit_probability_scenarios.py
+python scripts/hit_probability_scenarios.py
 ```
 
 **Features:**
@@ -245,17 +243,17 @@ python hit_probability_scenarios.py
 source .venv/bin/activate
 
 # 1. Run evaluation
-python evaluate_dqn_trajectories.py
+python scripts/evaluate_dqn_trajectories.py
 
 # 2. Generate summary reports
-python generate_training_summary.py
-python generate_training_summary_tex.py
+python scripts/generate_training_summary.py
+python scripts/generate_training_summary_tex.py
 
 # 3. Run scenario analysis
-python hit_probability_scenarios.py
+python scripts/hit_probability_scenarios.py
 
 # 4. View all generated outputs
-ls -lh reports/*.png reports/*.md reports/*.tex scenario_plots/
+ls -lh reports/ results/scenario_plots/
 ```
 
 ## Quick Start
@@ -355,7 +353,7 @@ python -m rl_training.train.train_dqn_curriculum \
     --start_phase 1 \
     --end_phase 4 \
     --timesteps 15000 \
-    --config best_params_optuna.json
+    --config config/best_params_optuna.json
 ```
 
 #### SAC-HER Training (Alternative)
@@ -425,13 +423,13 @@ monitor = PerformanceMonitorCallback(
 #### Model Evaluation
 ```bash
 # Evaluate trained DQN model on diverse trajectories
-python evaluate_dqn_trajectories.py
+python scripts/evaluate_dqn_trajectories.py
 ```
 
 This generates:
-- `trajectory_evaluation.png` - Visualization of all scenarios
-- `evaluation_summary.csv` - Tabular results
-- `hp_histogram.png` - Hit probability distribution
+- `results/trajectory_evaluation.png` - Visualization of all scenarios
+- `results/evaluation_summary.csv` - Tabular results
+- `results/scenario_plots/` - Per-scenario plots
 - Console output with detailed statistics
 
 #### Training Visualization

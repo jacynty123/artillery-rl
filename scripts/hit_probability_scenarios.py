@@ -8,8 +8,19 @@ and uncertainty levels.
 """
 
 import numpy as np
+import sys
+from pathlib import Path
 from scipy.stats import multivariate_normal
 import matplotlib.pyplot as plt
+
+ROOT = Path(__file__).parent.parent
+RESULTS_DIR = ROOT / "results"
+RESULTS_DIR.mkdir(exist_ok=True)
+
+# Ensure project root is on the path so src/ imports resolve
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from src.hit_probability import HitProbabilityCalculator
 # Use find_optimal_firing_angles to get best firing solution
 from src.find_optimal_firing_angles import (
@@ -354,8 +365,9 @@ def create_visualization(results, n_iterations):
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("hit_probability_analysis.png", dpi=300, bbox_inches="tight")
-    print("Visualization saved as 'hit_probability_analysis.png'")
+    out = RESULTS_DIR / "hit_probability_analysis.png"
+    plt.savefig(out, dpi=300, bbox_inches="tight")
+    print(f"Visualization saved as '{out}'")
 
 
 def main(n_iterations=10, range_m=1000.0, target_length=12.0, target_width=6., target_height=3.,
@@ -413,7 +425,7 @@ def main(n_iterations=10, range_m=1000.0, target_length=12.0, target_width=6., t
     create_visualization(results, n_iterations)
 
     print(f"\nAnalysis complete! {n_iterations} iterations completed.")
-    print("Results saved to 'hit_probability_analysis.png'")
+    print(f"Results saved to '{RESULTS_DIR / 'hit_probability_analysis.png'}'")
 
     return results
 

@@ -119,7 +119,7 @@ def train_curriculum_phase(
     
     print(f"\nTraining Phase {phase}")
     print(f"Total timesteps: {total_timesteps}")
-    print(f"Epsilon: {epsilon_start} → {epsilon_end} over {epsilon_decay_steps} steps")
+    print(f"Epsilon: {epsilon_start} -> {epsilon_end} over {epsilon_decay_steps} steps")
     print(f"Evaluation every {eval_interval} episodes")
     print(f"Starting training...\n")
     
@@ -199,7 +199,7 @@ def train_curriculum_phase(
             if episode_count % 20 == 0:
                 elapsed = time.time() - start_time
                 avg_reward = np.mean(episode_rewards[-20:])
-                print(f"Step {step:5d} | Ep {episode_count:4d} | ε={epsilon:.3f} | "
+                print(f"Step {step:5d} | Ep {episode_count:4d} | eps={epsilon:.3f} | "
                       f"Reward={avg_reward:6.1f} | Len={episode_length:2d} | Time={elapsed:.0f}s")
                 
                 # Monitor summary every 100 episodes
@@ -212,7 +212,7 @@ def train_curriculum_phase(
                 final_results = eval_results
                 # Check if phase complete
                 if check_phase_completion(curriculum, eval_results):
-                    print(f"\n✓ Phase {phase} mastered after {episode_count} episodes!")
+                    print(f"\n[OK] Phase {phase} mastered after {episode_count} episodes!")
                     break
             # Reset for next episode
             scenario = curriculum.get_next_scenario()
