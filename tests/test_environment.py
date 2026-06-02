@@ -316,26 +316,18 @@ class TestArtilleryFiringEnv:
         for value in trajectory_after_second_reset.values():
             assert value == 0.5
 
-    def test_cache_backward_compat_old_format(self):
-        """reset() handles old-format cache entries (plain dict, not tuple).
-
-        When hp_cache[key] is a plain dict, the backward-compat branch must copy
-        it into hp_trajectory and build cov_trajectory with default 1000.0 values.
-        """
-        # Store a plain-dict entry under the patched key
+    def test_cache_hit_tuple_format(self):
+        """reset() correctly unpacks a cached (hp_trajectory, cov_trajectory) tuple."""
         steps = list(range(self.env.max_episode_steps + 1))
-        old_format = {s: 0.7 for s in steps}
-        self.env.hp_cache['__test__'] = old_format  # plain dict, not tuple
+        hp_dict = {s: 0.7 for s in steps}
+        cov_dict = {s: 500.0 for s in steps}
+        self.env.hp_cache['__test__'] = (hp_dict, cov_dict)
 
         self.env.reset(seed=42)
 
-        # hp_trajectory should match the plain-dict values
         for s in steps:
             assert self.env.hp_trajectory[s] == 0.7
-
-        # cov_trajectory should be defaulted to 1000.0 for every step
-        for s in steps:
-            assert self.env.cov_trajectory[s] == 1000.0
+            assert self.env.cov_trajectory[s] == 500.0
 
     def test_hold_reward_tier_low_hp(self):
         """HOLD when hp < 0.5 gives reward = hp_improvement * 5.0 - 0.1."""

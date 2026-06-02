@@ -11,6 +11,36 @@ from typing import Dict, List
 from ..infrastructure.training_config import TrainingConstants
 
 
+def rollout(env, q_network, scenario, device):
+    """Run one greedy episode and return per-episode stats dict."""
+    state, _ = env.reset(scenario_override=scenario)
+    episode_reward = 0.0
+    done = False
+    step_count = 0
+    fired_at_step = None
+    info = {}
+
+    while not done:
+        with torch.no_grad():
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
+            action = q_network(state_tensor).argmax().item()
+
+        next_state, reward, terminated, truncated, info = env.step(action)
+        if action == 1 and fired_at_step is None:  # Action.FIRE == 1
+            fired_at_step = step_count + 1  # 1-based step
+        done = terminated or truncated
+        episode_reward += reward
+        step_count += 1
+        state = next_state
+
+    return {
+        'reward': episode_reward,
+        'hp': info.get('hit_probability', 0.0),
+        'steps': step_count,
+        'fired_at_step': fired_at_step,
+    }
+
+
 def evaluate_on_scenario(env, q_network, scenario, device, n_episodes=TrainingConstants.EVAL_EPISODES_PER_SCENARIO):
     """Evaluate policy on a specific scenario."""
     rewards = []
@@ -20,37 +50,19 @@ def evaluate_on_scenario(env, q_network, scenario, device, n_episodes=TrainingCo
     firing_steps = []
 
     for _ in range(n_episodes):
-        state, _ = env.reset(scenario_override=scenario)
-        episode_reward = 0
-        done = False
-        step_count = 0
+        ep = rollout(env, q_network, scenario, device)
         initial_range = scenario.range_m
-        fired_at_step = None
+        fired_at_step = ep['fired_at_step']
+        step_count = ep['steps']
+        final_hp = ep['hp']
 
-        while not done:
-            with torch.no_grad():
-                state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
-                action = q_network(state_tensor).argmax().item()
-
-            next_state, reward, terminated, truncated, info = env.step(action)
-            if action == 1 and fired_at_step is None:  # Action.FIRE == 1
-                fired_at_step = step_count + 1  # 1-based step
-            done = terminated or truncated
-            episode_reward += reward
-            step_count += 1
-            state = next_state
-
-        final_hp = info.get('hit_probability', 0.0)
-
-        # Debug print for evaluation
         if TrainingConstants.DEBUG:
             print(f"Scenario: {scenario.name}, Fired at step: {fired_at_step}, Final HP: {final_hp:.3f}")
 
-        # Calculate firing range
         elapsed_time = step_count * (scenario.tracking_duration / env.max_episode_steps)
         firing_range = initial_range + scenario.target_vx * elapsed_time
 
-        rewards.append(episode_reward)
+        rewards.append(ep['reward'])
         hps.append(final_hp)
         steps_list.append(step_count)
         firing_ranges.append(firing_range)

@@ -65,3 +65,21 @@ class TrainingConstants:
 
     # Hold Penalties (increased to encourage earlier firing)
     HOLD_PENALTY_BASE: float = -10.0
+
+
+@dataclass
+class RewardConfig:
+    """All configurable reward parameters for ArtilleryFiringEnv and training."""
+    firing_reward_high: float = 100.0
+    time_penalty_factor: float = -100.0
+    hold_penalty_high: float = -10.0
+    reward_excellent: float = 100.0
+    reward_good: float = 80.0
+    reward_minimum: float = 60.0
+    reward_fair: float = 40.0
+    reward_poor: float = 20.0
+    reward_failure: float = -30.0
+    hold_penalty_base: float = -10.0
+    opportunity_cost_excellent: float = -30.0
+    opportunity_cost_good: float = -15.0
+    opportunity_cost_minimum: float = -8.0

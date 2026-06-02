@@ -11,7 +11,7 @@ from pathlib import Path
 try:
     from ..environment import ArtilleryFiringEnv, Action
     from ..curriculum.curriculum_scenarios import CurriculumScenarios
-    from ..infrastructure.training_config import TrainingConstants
+    from ..infrastructure.training_config import TrainingConstants, RewardConfig
     from ..agents.dqn_components import DQN, ReplayBuffer
     from ..utils.evaluation_utils import evaluate_on_scenario, evaluate_curriculum, check_phase_completion
     from ..utils.training_monitor import TrainingMonitor
@@ -26,7 +26,7 @@ except ImportError:
     # Import from the rl_training package
     from rl_training.environment import ArtilleryFiringEnv, Action
     from rl_training.curriculum.curriculum_scenarios import CurriculumScenarios
-    from rl_training.infrastructure.training_config import TrainingConstants
+    from rl_training.infrastructure.training_config import TrainingConstants, RewardConfig
     from rl_training.agents.dqn_components import DQN, ReplayBuffer
     from rl_training.utils.evaluation_utils import evaluate_on_scenario, evaluate_curriculum, check_phase_completion
     from rl_training.utils.training_monitor import TrainingMonitor
@@ -41,6 +41,29 @@ def select_action(state, q_network, epsilon, action_dim, device):
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             q_values = q_network(state_tensor)
             return q_values.argmax().item()
+
+
+def _dqn_update_step(q_network, target_network, optimizer, replay_buffer, batch_size, gamma, device):
+    """Sample a minibatch and perform one DQN gradient update. No-op if buffer is too small."""
+    if len(replay_buffer) < batch_size:
+        return
+    states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
+
+    states_t = torch.FloatTensor(states).to(device)
+    actions_t = torch.LongTensor(actions).to(device)
+    rewards_t = torch.FloatTensor(rewards).to(device)
+    next_states_t = torch.FloatTensor(next_states).to(device)
+    dones_t = torch.FloatTensor(dones).to(device)
+
+    current_q = q_network(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
+    with torch.no_grad():
+        next_q = target_network(next_states_t).max(1)[0]
+        target_q = rewards_t + gamma * next_q * (1 - dones_t)
+
+    loss = nn.MSELoss()(current_q, target_q)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
 
 def train_curriculum_phase(
@@ -58,47 +81,65 @@ def train_curriculum_phase(
     learning_starts: int = TrainingConstants.LEARNING_STARTS,
     device: str = "cpu",
     load_from: str = None,
-    firing_reward_high: float = 100.0,
-    time_penalty_factor: float = -100.0,
-    hold_penalty_high: float = -10.0,
-    # Additional configurable reward parameters
-    reward_excellent: float = 100.0,
-    reward_good: float = 80.0,
-    reward_minimum: float = 60.0,
-    reward_fair: float = 40.0,
-    reward_poor: float = 20.0,
-    reward_failure: float = -30.0,
-    hold_penalty_base: float = -10.0,
-    opportunity_cost_excellent: float = -30.0,
-    opportunity_cost_good: float = -15.0,
-    opportunity_cost_minimum: float = -8.0
+    reward_config: RewardConfig = None,
+    # Individual reward params kept for backward compatibility
+    firing_reward_high: float = None,
+    time_penalty_factor: float = None,
+    hold_penalty_high: float = None,
+    reward_excellent: float = None,
+    reward_good: float = None,
+    reward_minimum: float = None,
+    reward_fair: float = None,
+    reward_poor: float = None,
+    reward_failure: float = None,
+    hold_penalty_base: float = None,
+    opportunity_cost_excellent: float = None,
+    opportunity_cost_good: float = None,
+    opportunity_cost_minimum: float = None,
 ):
     """Train DQN on a curriculum phase."""
     device = torch.device(device)
-    
+
+    # Build RewardConfig from individual params if not provided as object
+    if reward_config is None:
+        rc = RewardConfig()
+        if firing_reward_high is not None: rc.firing_reward_high = firing_reward_high
+        if time_penalty_factor is not None: rc.time_penalty_factor = time_penalty_factor
+        if hold_penalty_high is not None: rc.hold_penalty_high = hold_penalty_high
+        if reward_excellent is not None: rc.reward_excellent = reward_excellent
+        if reward_good is not None: rc.reward_good = reward_good
+        if reward_minimum is not None: rc.reward_minimum = reward_minimum
+        if reward_fair is not None: rc.reward_fair = reward_fair
+        if reward_poor is not None: rc.reward_poor = reward_poor
+        if reward_failure is not None: rc.reward_failure = reward_failure
+        if hold_penalty_base is not None: rc.hold_penalty_base = hold_penalty_base
+        if opportunity_cost_excellent is not None: rc.opportunity_cost_excellent = opportunity_cost_excellent
+        if opportunity_cost_good is not None: rc.opportunity_cost_good = opportunity_cost_good
+        if opportunity_cost_minimum is not None: rc.opportunity_cost_minimum = opportunity_cost_minimum
+        reward_config = rc
+
     # Initialize curriculum and environment
     curriculum = CurriculumScenarios(phase=phase)
-    # curriculum.scenarios = curriculum.scenarios[:2]  # Removed scenario limiting for full generalization
     curriculum.print_curriculum_info()
-    
+
     # Initialize training monitor
     monitor = TrainingMonitor()
-    
+
     # Create environment without fixed max_episode_steps to enable dynamic step calculation
     env = ArtilleryFiringEnv(
-        firing_reward_high=firing_reward_high,
-        time_penalty_factor=time_penalty_factor,
-        hold_penalty_high=hold_penalty_high,
-        reward_excellent=reward_excellent,
-        reward_good=reward_good,
-        reward_minimum=reward_minimum,
-        reward_fair=reward_fair,
-        reward_poor=reward_poor,
-        reward_failure=reward_failure,
-        hold_penalty_base=hold_penalty_base,
-        opportunity_cost_excellent=opportunity_cost_excellent,
-        opportunity_cost_good=opportunity_cost_good,
-        opportunity_cost_minimum=opportunity_cost_minimum
+        firing_reward_high=reward_config.firing_reward_high,
+        time_penalty_factor=reward_config.time_penalty_factor,
+        hold_penalty_high=reward_config.hold_penalty_high,
+        reward_excellent=reward_config.reward_excellent,
+        reward_good=reward_config.reward_good,
+        reward_minimum=reward_config.reward_minimum,
+        reward_fair=reward_config.reward_fair,
+        reward_poor=reward_config.reward_poor,
+        reward_failure=reward_config.reward_failure,
+        hold_penalty_base=reward_config.hold_penalty_base,
+        opportunity_cost_excellent=reward_config.opportunity_cost_excellent,
+        opportunity_cost_good=reward_config.opportunity_cost_good,
+        opportunity_cost_minimum=reward_config.opportunity_cost_minimum,
     )
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
@@ -157,24 +198,7 @@ def train_curriculum_phase(
 
         # Training step
         if len(replay_buffer) >= learning_starts and step % 4 == 0:
-            states, actions, rewards, next_states, dones = replay_buffer.sample(batch_size)
-
-            states_t = torch.FloatTensor(states).to(device)
-            actions_t = torch.LongTensor(actions).to(device)
-            rewards_t = torch.FloatTensor(rewards).to(device)
-            next_states_t = torch.FloatTensor(next_states).to(device)
-            dones_t = torch.FloatTensor(dones).to(device)
-
-            # Q-learning update
-            current_q = q_network(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
-            with torch.no_grad():
-                next_q = target_network(next_states_t).max(1)[0]
-                target_q = rewards_t + gamma * next_q * (1 - dones_t)
-
-            loss = nn.MSELoss()(current_q, target_q)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            _dqn_update_step(q_network, target_network, optimizer, replay_buffer, batch_size, gamma, device)
 
         # Target network update
         if step % target_update_freq == 0 and step > 0:
@@ -260,11 +284,7 @@ if __name__ == "__main__":
     for phase in range(args.start_phase, args.end_phase + 1):
         print(f"\n\nSTARTING PHASE {phase}: Curriculum Training")
         print("=" * 80)
-        q_network, results = train_curriculum_phase(
-            phase=phase,
-            total_timesteps=args.timesteps,
-            eval_interval=config.get("eval_interval", 100),
-            epsilon_decay_steps=config.get("epsilon_decay_steps", 2000),
+        rc = RewardConfig(
             firing_reward_high=config.get("firing_reward_high", 100.0),
             time_penalty_factor=config.get("time_penalty_factor", -100.0),
             hold_penalty_high=config.get("hold_penalty_high", -10.0),
@@ -278,6 +298,13 @@ if __name__ == "__main__":
             opportunity_cost_excellent=config.get("opportunity_cost_excellent", -30.0),
             opportunity_cost_good=config.get("opportunity_cost_good", -15.0),
             opportunity_cost_minimum=config.get("opportunity_cost_minimum", -8.0),
+        )
+        q_network, results = train_curriculum_phase(
+            phase=phase,
+            total_timesteps=args.timesteps,
+            eval_interval=config.get("eval_interval", 100),
+            epsilon_decay_steps=config.get("epsilon_decay_steps", 2000),
+            reward_config=rc,
             load_from=prev_checkpoint
         )
         prev_checkpoint = str(Path(__file__).parent.parent / "models" / "checkpoints" / f"dqn_curriculum_phase{phase}.pth")

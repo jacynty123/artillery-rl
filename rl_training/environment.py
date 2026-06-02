@@ -18,7 +18,7 @@ try:
     from src.hit_probability import HitProbabilityCalculator
     from src.find_optimal_firing_angles import find_optimal_firing_angles
     from src.kalman_filter import TargetKalmanFilter
-    from .infrastructure.training_config import TrainingConstants
+    from .infrastructure.training_config import TrainingConstants, RewardConfig
 except ImportError:
     # Fallback for standalone execution
     import sys
@@ -32,7 +32,7 @@ except ImportError:
     from src.hit_probability import HitProbabilityCalculator
     from src.find_optimal_firing_angles import find_optimal_firing_angles
     from src.kalman_filter import TargetKalmanFilter
-    from rl_training.infrastructure.training_config import TrainingConstants
+    from rl_training.infrastructure.training_config import TrainingConstants, RewardConfig
 
 
 class Action(IntEnum):
@@ -356,14 +356,7 @@ class ArtilleryFiringEnv(gym.Env):
         # Cache trajectories for identical scenarios to avoid recomputation
         cache_key = self._get_cache_key(scenario, seed=seed)
         if cache_key in self.hp_cache:
-            # Use cached trajectory
-            cached_data = self.hp_cache[cache_key]
-            if isinstance(cached_data, tuple):
-                self.hp_trajectory, self.cov_trajectory = cached_data
-            else:
-                # Backward compatibility: old cache format
-                self.hp_trajectory = cached_data.copy()
-                self.cov_trajectory = {step: 1000.0 for step in self.hp_trajectory.keys()}
+            self.hp_trajectory, self.cov_trajectory = self.hp_cache[cache_key]
         else:
             # Calculate new trajectory in parallel
             self.hp_trajectory = {}  # {step: hp_value}
@@ -435,60 +428,9 @@ class ArtilleryFiringEnv(gym.Env):
             print(f"\n[DEBUG] Step {self.current_state.episode_step} | Action: {action} | Prev HP: {prev_hp:.3f}")
 
         if action == Action.FIRE:
-            hp = self.hp_trajectory[self.current_state.episode_step]
-            self.current_state.current_hit_probability = hp
-            self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
-            # Update HP history before calculating reward
-            self.current_state.hp_history.append(hp)
-            # Use strong time-based firing reward logic
-            reward = self._calculate_firing_reward(hp, self.current_state.episode_step)
-            terminated = True
-            if self.debug:
-                print(f"[DEBUG] FIRE at step {self.current_state.episode_step}: HP={hp:.3f}, Reward={reward:.2f}")
-                print(f"[DEBUG] Episode terminated by FIRE action.")
+            reward, terminated = self._handle_fire()
         elif action == Action.HOLD:
-            time_step = self.current_state.scenario.tracking_duration / self.max_episode_steps
-            self.current_state.time_remaining -= time_step
-            self.current_state.episode_step += 1
-            hp = self.hp_trajectory[self.current_state.episode_step]
-            self.current_state.current_hit_probability = hp
-            self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
-            # Update HP history
-            self.current_state.hp_history.append(hp)
-            # Maintain fixed history length
-            if len(self.current_state.hp_history) > self.hp_history_length:
-                self.current_state.hp_history.pop(0)
-            
-            hp_improvement = hp - prev_hp
-            # Improved HOLD reward structure - reduced penalties for holding when HP is good
-            if hp < 0.5:
-                reward = hp_improvement * 5.0 - 0.1
-            elif hp < 0.6:
-                reward = -0.5  # Reduced from -1.0 for moderate HP
-            elif hp < 0.7:
-                reward = -2.0  # Reduced from -3.0
-            else:
-                reward = self.hold_penalty_high * 0.5  # Reduced penalty for excellent HP
-            
-            # CRITICAL: Increase HOLD penalty if HP has plateaued and is above minimum
-            if self._is_hp_plateau() and hp >= self.hp_minimum_threshold:
-                reward *= self.plateau_hold_multiplier
-                if self.debug:
-                    print(f"[DEBUG] HP plateau detected at step {self.current_state.episode_step}, HOLD penalty multiplied by {self.plateau_hold_multiplier}")
-            if self.debug:
-                print(f"[DEBUG] HOLD: Step={self.current_state.episode_step}, HP={hp:.3f}, HP_Improvement={hp_improvement:.3f}, Reward={reward:.2f}")
-            if self.current_state.time_remaining <= 0 or self.current_state.episode_step >= self.max_episode_steps:
-                terminated = True
-                if self.debug:
-                    print(f"[DEBUG] Episode ended by timeout (no FIRE). time_remaining={self.current_state.time_remaining:.2f}, episode_step={self.current_state.episode_step}")
-                # Timeout penalty if HP was ever high but agent never fired
-                # NOTE: previously this branch was nested inside `if self.debug:`
-                # and therefore never applied during real training. Moved out so
-                # the penalty described in the paper actually fires.
-                if action != Action.FIRE and self._hp_high_reached:
-                    reward -= 40.0  # Much larger penalty for waiting endlessly
-                    if self.debug:
-                        print(f"[DEBUG] Timeout penalty applied: HP was high but agent never fired.")
+            reward, terminated = self._handle_hold(prev_hp)
         else:
             raise ValueError(f"Invalid action: {action}")
 
@@ -532,6 +474,58 @@ class ArtilleryFiringEnv(gym.Env):
         convergence_factor = min(1.0, elapsed_time / 5.0)
         return base_hp * (0.3 + 0.7 * convergence_factor)
     
+    def _handle_fire(self) -> Tuple[float, bool]:
+        """Execute FIRE action: update state, compute reward, terminate episode."""
+        hp = self.hp_trajectory[self.current_state.episode_step]
+        self.current_state.current_hit_probability = hp
+        self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
+        self.current_state.hp_history.append(hp)
+        reward = self._calculate_firing_reward(hp, self.current_state.episode_step)
+        if self.debug:
+            print(f"[DEBUG] FIRE at step {self.current_state.episode_step}: HP={hp:.3f}, Reward={reward:.2f}")
+            print(f"[DEBUG] Episode terminated by FIRE action.")
+        return reward, True
+
+    def _handle_hold(self, prev_hp: float) -> Tuple[float, bool]:
+        """Execute HOLD action: advance time, update state, compute reward."""
+        time_step = self.current_state.scenario.tracking_duration / self.max_episode_steps
+        self.current_state.time_remaining -= time_step
+        self.current_state.episode_step += 1
+        hp = self.hp_trajectory[self.current_state.episode_step]
+        self.current_state.current_hit_probability = hp
+        self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
+        self.current_state.hp_history.append(hp)
+        if len(self.current_state.hp_history) > self.hp_history_length:
+            self.current_state.hp_history.pop(0)
+
+        hp_improvement = hp - prev_hp
+        if hp < 0.5:
+            reward = hp_improvement * 5.0 - 0.1
+        elif hp < 0.6:
+            reward = -0.5
+        elif hp < 0.7:
+            reward = -2.0
+        else:
+            reward = self.hold_penalty_high * 0.5
+
+        if self._is_hp_plateau() and hp >= self.hp_minimum_threshold:
+            reward *= self.plateau_hold_multiplier
+            if self.debug:
+                print(f"[DEBUG] HP plateau detected at step {self.current_state.episode_step}, HOLD penalty multiplied by {self.plateau_hold_multiplier}")
+        if self.debug:
+            print(f"[DEBUG] HOLD: Step={self.current_state.episode_step}, HP={hp:.3f}, HP_Improvement={hp_improvement:.3f}, Reward={reward:.2f}")
+
+        terminated = False
+        if self.current_state.time_remaining <= 0 or self.current_state.episode_step >= self.max_episode_steps:
+            terminated = True
+            if self.debug:
+                print(f"[DEBUG] Episode ended by timeout (no FIRE). time_remaining={self.current_state.time_remaining:.2f}, episode_step={self.current_state.episode_step}")
+            if self._hp_high_reached:
+                reward -= 40.0
+                if self.debug:
+                    print(f"[DEBUG] Timeout penalty applied: HP was high but agent never fired.")
+        return reward, terminated
+
     def _calculate_hit_probability(self, scenario: ScenarioParameters, debug: bool = False):
         """
         Calculate current hit probability for a scenario using full pipeline:

@@ -69,40 +69,40 @@ class TestRunTraining:
     def test_parses_avg_hp(self):
         """avg_hp is extracted from 'Average HP:' line."""
         result, _ = self._run(stdout=_FAKE_STDOUT)
-        assert abs(result["avg_hp"] - 0.75) < 1e-9
+        assert abs(result.avg_hp - 0.75) < 1e-9
 
     def test_parses_min_hp(self):
         """min_hp is extracted from 'Min HP:' line."""
         result, _ = self._run(stdout=_FAKE_STDOUT)
-        assert abs(result["min_hp"] - 0.60) < 1e-9
+        assert abs(result.min_hp - 0.60) < 1e-9
 
     def test_parses_avg_steps(self):
         """avg_steps is extracted from the timing efficiency line."""
         result, _ = self._run(stdout=_FAKE_STDOUT)
-        assert abs(result["avg_steps"] - 28.0) < 1e-9
+        assert abs(result.avg_steps - 28.0) < 1e-9
 
     def test_success_true_when_hp_above_threshold(self):
         """success=True when returncode==0 and avg_hp >= 0.7."""
         result, _ = self._run(stdout=_FAKE_STDOUT, returncode=0)
-        assert result["success"] is True
+        assert result.success is True
 
     def test_success_false_on_nonzero_returncode(self):
         """success=False when subprocess exits with non-zero code."""
         result, _ = self._run(stdout=_FAKE_STDOUT, returncode=1)
-        assert result["success"] is False
+        assert result.success is False
 
     def test_success_false_when_hp_below_threshold(self):
         """success=False when avg_hp < 0.7."""
         low_hp_stdout = _FAKE_STDOUT.replace("Average HP: 0.75", "Average HP: 0.65")
         result, _ = self._run(stdout=low_hp_stdout)
-        assert result["success"] is False
+        assert result.success is False
 
     def test_missing_metrics_return_none(self):
         """avg_hp, min_hp, avg_steps are None when stdout has no matching lines."""
         result, _ = self._run(stdout="Training complete.\n")
-        assert result["avg_hp"] is None
-        assert result["min_hp"] is None
-        assert result["avg_steps"] is None
+        assert result.avg_hp is None
+        assert result.min_hp is None
+        assert result.avg_steps is None
 
     def test_config_file_written_and_deleted(self):
         """run_training writes a temp JSON config and deletes it afterwards."""

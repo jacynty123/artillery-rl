@@ -9,6 +9,7 @@ import subprocess
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 import tempfile
 import optuna
@@ -24,6 +25,16 @@ RESULTS_DIR.mkdir(exist_ok=True)
 # Add imports for statistics and plotting
 import pandas as pd
 import matplotlib.pyplot as plt
+
+
+@dataclass
+class TrainingResult:
+    """Structured output from a single run_training() call."""
+    avg_hp: float
+    min_hp: float
+    avg_steps: float
+    hp_std: float
+    success: bool
 
 def run_training(epsilon_decay_steps, firing_reward_high, time_penalty_factor, hold_penalty_high, eval_interval, 
                 reward_excellent, reward_good, reward_minimum, reward_fair, reward_poor, reward_failure,
@@ -84,16 +95,62 @@ def run_training(epsilon_decay_steps, firing_reward_high, time_penalty_factor, h
         
         hp_std = (avg_hp - min_hp) if avg_hp is not None and min_hp is not None else 0.0
         
-        return {
-            "avg_hp": avg_hp,
-            "min_hp": min_hp,
-            "avg_steps": avg_steps,
-            "hp_std": hp_std,
-            "success": result.returncode == 0 and avg_hp is not None and avg_hp >= 0.7
-        }
+        return TrainingResult(
+            avg_hp=avg_hp,
+            min_hp=min_hp,
+            avg_steps=avg_steps,
+            hp_std=hp_std,
+            success=result.returncode == 0 and avg_hp is not None and avg_hp >= 0.7
+        )
         
     finally:
         os.unlink(config_file)
+
+
+def _save_optuna_plots(study, study_name: str) -> None:
+    """Save Optuna HTML visualizations if plotly is available."""
+    try:
+        import plotly
+        print("\nGenerating visualizations...")
+
+        fig = optuna.visualization.plot_param_importances(study)
+        out1 = CONFIG_DIR / f"{study_name}_param_importances.html"
+        fig.write_html(str(out1))
+        print(f"Parameter importance plot saved to {out1}")
+
+        fig2 = optuna.visualization.plot_optimization_history(study)
+        out2 = CONFIG_DIR / f"{study_name}_optimization_history.html"
+        fig2.write_html(str(out2))
+        print(f"Optimization history plot saved to {out2}")
+
+        fig3 = optuna.visualization.plot_parallel_coordinate(study)
+        out3 = CONFIG_DIR / f"{study_name}_parallel_coordinate.html"
+        fig3.write_html(str(out3))
+        print(f"Parallel coordinate plot saved to {out3}")
+
+    except ImportError:
+        print("Install plotly for visualizations: pip install plotly")
+
+
+def _define_reward_search_space(trial) -> dict:
+    """Define the reward parameter search space for Optuna trials."""
+    return {
+        "epsilon_decay_steps": trial.suggest_categorical("epsilon_decay_steps", [250, 500, 1000, 2000, 4000, 8000]),
+        "firing_reward_high": trial.suggest_categorical("firing_reward_high", [100, 150]),
+        "time_penalty_factor": trial.suggest_categorical("time_penalty_factor", [-100, -120, -150]),
+        "hold_penalty_high": trial.suggest_categorical("hold_penalty_high", [-10, -12]),
+        "eval_interval": trial.suggest_categorical("eval_interval", [50, 100]),
+        "reward_excellent": trial.suggest_categorical("reward_excellent", [80, 100, 120, 150]),
+        "reward_good": trial.suggest_categorical("reward_good", [60, 80, 100, 120]),
+        "reward_minimum": trial.suggest_categorical("reward_minimum", [40, 60, 80, 100]),
+        "reward_fair": trial.suggest_categorical("reward_fair", [20, 40, 60, 80]),
+        "reward_poor": trial.suggest_categorical("reward_poor", [10, 20, 30, 40]),
+        "reward_failure": trial.suggest_categorical("reward_failure", [-50, -30, -10, 0]),
+        "hold_penalty_base": trial.suggest_categorical("hold_penalty_base", [-15, -10, -5, 0]),
+        "opportunity_cost_excellent": trial.suggest_categorical("opportunity_cost_excellent", [-40, -30, -20, -10]),
+        "opportunity_cost_good": trial.suggest_categorical("opportunity_cost_good", [-20, -15, -10, -5]),
+        "opportunity_cost_minimum": trial.suggest_categorical("opportunity_cost_minimum", [-10, -8, -5, 0]),
+    }
 
 
 def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study_name="dqn_reward_optimization"):
@@ -111,38 +168,23 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
 
     def reward_objective(trial):
         """Objective function focused on reward parameter optimization."""
-        # Core hyperparameters (smaller ranges for reward-focused optimization)
-        epsilon_decay_steps = trial.suggest_categorical("epsilon_decay_steps", [250, 500, 1000, 2000, 4000, 8000])
-        firing_reward_high = trial.suggest_categorical("firing_reward_high", [100, 150])
-        time_penalty_factor = trial.suggest_categorical("time_penalty_factor", [-100, -120, -150])
-        hold_penalty_high = trial.suggest_categorical("hold_penalty_high", [-10, -12])
-        eval_interval = trial.suggest_categorical("eval_interval", [50, 100])
+        params = _define_reward_search_space(trial)
 
-        # Comprehensive reward parameters
-        reward_excellent = trial.suggest_categorical("reward_excellent", [80, 100, 120, 150])
-        reward_good = trial.suggest_categorical("reward_good", [60, 80, 100, 120])
-        reward_minimum = trial.suggest_categorical("reward_minimum", [40, 60, 80, 100])
-        reward_fair = trial.suggest_categorical("reward_fair", [20, 40, 60, 80])
-        reward_poor = trial.suggest_categorical("reward_poor", [10, 20, 30, 40])
-        reward_failure = trial.suggest_categorical("reward_failure", [-50, -30, -10, 0])
-        hold_penalty_base = trial.suggest_categorical("hold_penalty_base", [-15, -10, -5, 0])
-        opportunity_cost_excellent = trial.suggest_categorical("opportunity_cost_excellent", [-40, -30, -20, -10])
-        opportunity_cost_good = trial.suggest_categorical("opportunity_cost_good", [-20, -15, -10, -5])
-        opportunity_cost_minimum = trial.suggest_categorical("opportunity_cost_minimum", [-10, -8, -5, 0])
-
-        # Run training with more timesteps for reward-focused optimization
         result = run_training(
-            epsilon_decay_steps, firing_reward_high, time_penalty_factor, hold_penalty_high, eval_interval,
-            reward_excellent, reward_good, reward_minimum, reward_fair, reward_poor, reward_failure,
-            hold_penalty_base, opportunity_cost_excellent, opportunity_cost_good, opportunity_cost_minimum,
+            params["epsilon_decay_steps"], params["firing_reward_high"], params["time_penalty_factor"],
+            params["hold_penalty_high"], params["eval_interval"],
+            params["reward_excellent"], params["reward_good"], params["reward_minimum"],
+            params["reward_fair"], params["reward_poor"], params["reward_failure"],
+            params["hold_penalty_base"], params["opportunity_cost_excellent"],
+            params["opportunity_cost_good"], params["opportunity_cost_minimum"],
             timesteps=timesteps_per_trial
         )
 
-        if result["success"]:
+        if result.success:
             # Enhanced scoring for reward optimization
-            hp_score = result["avg_hp"] * 10  # Weight HP heavily
-            timing_score = -0.05 * ((result["avg_steps"] or 0) - 20)  # Penalize late firing
-            consistency_score = -0.05 * result["hp_std"]  # Penalize inconsistency
+            hp_score = result.avg_hp * 10  # Weight HP heavily
+            timing_score = -0.05 * ((result.avg_steps or 0) - 20)  # Penalize late firing
+            consistency_score = -0.05 * result.hp_std  # Penalize inconsistency
             score = hp_score + timing_score + consistency_score
             return score
         else:
@@ -183,30 +225,7 @@ def run_optuna_reward_optimization(n_trials=50, timesteps_per_trial=10000, study
         print(f"Score std: {pd.Series(scores).std():.4f}")
 
     # Generate visualizations if plotly is available
-    try:
-        import plotly
-        print("\nGenerating visualizations...")
-
-        # Parameter importance
-        fig = optuna.visualization.plot_param_importances(study)
-        out1 = CONFIG_DIR / f"{study_name}_param_importances.html"
-        fig.write_html(str(out1))
-        print(f"Parameter importance plot saved to {out1}")
-
-        # Optimization history
-        fig2 = optuna.visualization.plot_optimization_history(study)
-        out2 = CONFIG_DIR / f"{study_name}_optimization_history.html"
-        fig2.write_html(str(out2))
-        print(f"Optimization history plot saved to {out2}")
-
-        # Parallel coordinate plot
-        fig3 = optuna.visualization.plot_parallel_coordinate(study)
-        out3 = CONFIG_DIR / f"{study_name}_parallel_coordinate.html"
-        fig3.write_html(str(out3))
-        print(f"Parallel coordinate plot saved to {out3}")
-
-    except ImportError:
-        print("Install plotly for visualizations: pip install plotly")
+    _save_optuna_plots(study, study_name)
 
     return study
 
@@ -257,8 +276,8 @@ def run_grid_search():
                         result = run_training(eps_decay, fire_reward, time_pen, hold_pen, eval_int,
                                              100.0, 80.0, 60.0, 40.0, 20.0, -30.0, -10.0, -30.0, -15.0, -8.0)
 
-                        if result["success"]:
-                            score = result["avg_hp"] - 0.1 * ((result["avg_steps"] or 0) - 20) - 0.1 * result["hp_std"]
+                        if result.success:
+                            score = result.avg_hp - 0.1 * ((result.avg_steps or 0) - 20) - 0.1 * result.hp_std
                             results.append({
                                 "params": {
                                     "epsilon_decay_steps": eps_decay,
@@ -267,15 +286,15 @@ def run_grid_search():
                                     "hold_penalty_high": hold_pen,
                                     "eval_interval": eval_int
                                 },
-                                "avg_hp": result["avg_hp"],
-                                "min_hp": result["min_hp"],
-                                "avg_steps": result["avg_steps"],
-                                "hp_std": result["hp_std"],
+                                "avg_hp": result.avg_hp,
+                                "min_hp": result.min_hp,
+                                "avg_steps": result.avg_steps,
+                                "hp_std": result.hp_std,
                                 "score": score
                             })
-                            print(f"  SUCCESS: HP={result['avg_hp']:.3f}, MinHP={result['min_hp']:.3f}, Steps={result['avg_steps']:.1f}, Std={result['hp_std']:.3f}, Score={score:.3f}")
+                            print(f"  SUCCESS: HP={result.avg_hp:.3f}, MinHP={result.min_hp:.3f}, Steps={result.avg_steps:.1f}, Std={result.hp_std:.3f}, Score={score:.3f}")
                         else:
-                            print(f"  FAILED: HP={result.get('avg_hp', 'N/A')}, Steps={result.get('avg_steps', 'N/A')}")
+                            print(f"  FAILED: HP={result.avg_hp}, Steps={result.avg_steps}")
 
     # Sort by score (higher HP, earlier firing)
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -384,9 +403,9 @@ def objective(trial):
                          reward_excellent, reward_good, reward_minimum, reward_fair, reward_poor, reward_failure,
                          hold_penalty_base, opportunity_cost_excellent, opportunity_cost_good, opportunity_cost_minimum)
 
-    if result["success"]:
+    if result.success:
         # Calculate score (higher is better)
-        score = result["avg_hp"] - 0.1 * ((result["avg_steps"] or 0) - 20) - 0.1 * result["hp_std"]
+        score = result.avg_hp - 0.1 * ((result.avg_steps or 0) - 20) - 0.1 * result.hp_std
         return score
     else:
         # Return very low score for failed runs
