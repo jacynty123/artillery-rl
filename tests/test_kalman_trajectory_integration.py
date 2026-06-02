@@ -22,6 +22,11 @@ DEFAULT_MEASUREMENT_NOISE_VEL = np.array([1.0, 1.0, 1.0])  # Velocity measuremen
 class TestKalmanTrajectoryIntegration:
     """Integration tests for Kalman filter with trajectory simulation."""
 
+    @pytest.fixture(autouse=True)
+    def seed_rng(self):
+        """Seed numpy's global RNG before each test for reproducibility."""
+        np.random.seed(42)
+
     def test_basic_tracking_constant_velocity(self):
         """Test basic tracking of constant velocity trajectory."""
         # Create true trajectory
