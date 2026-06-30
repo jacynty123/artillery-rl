@@ -7,6 +7,7 @@ Covers: evaluate_trajectory, load_dqn_model (error path),
 """
 
 import io
+import contextlib
 import sys
 import os
 import numpy as np
@@ -30,6 +31,7 @@ from evaluate_dqn_trajectories import (
 )
 from rl_training.agents.dqn_components import DQN
 from rl_training.curriculum.scenario_generator import ScenarioParameters
+import evaluate_dqn_trajectories
 
 
 # ---------------------------------------------------------------------------
@@ -282,3 +284,38 @@ class TestPlots:
     def test_plot_individual_scenarios_saves(self, tmp_path):
         plot_individual_scenarios([_full_result("Scn A")], plots_dir=str(tmp_path))
         assert (tmp_path / "Scn_A.png").exists()
+
+
+def _canned(name="S", rng=1500.0):
+    n = 6
+    return {
+        "scenario_name": name,
+        "initial_range": rng,
+        "steps": n,
+        "fired_at_step": 2,
+        "final_hp": 0.7,
+        "ranges": [rng - 10 * i for i in range(n + 1)],
+        "target_positions": [(rng - 10 * i, 0.0, 50.0) for i in range(n + 1)],
+    }
+
+
+class TestMain:
+
+    def test_main_model_missing(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog"])
+        with patch("evaluate_dqn_trajectories.load_dqn_model", side_effect=FileNotFoundError):
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = evaluate_dqn_trajectories.main()
+        assert result is None
+
+    def test_main_happy(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog", "--num_runs", "1"])
+        with patch("evaluate_dqn_trajectories.load_dqn_model", return_value=MagicMock()), \
+             patch("evaluate_dqn_trajectories.evaluate_trajectory",
+                   side_effect=lambda env, q, sc, dev, seed=None, **k: _canned(sc.name, sc.range_m)) as ev, \
+             patch("evaluate_dqn_trajectories.plot_trajectory_results"), \
+             patch("evaluate_dqn_trajectories.plot_individual_scenarios"), \
+             patch("pandas.DataFrame.to_csv"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                evaluate_dqn_trajectories.main()
+        assert ev.call_count == 5

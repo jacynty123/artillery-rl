@@ -15,6 +15,10 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 from parameter_sweep import run_training
 
 
@@ -171,3 +175,36 @@ class TestMainDispatch:
         with patch("parameter_sweep.run_optuna_reward_optimization") as m:
             parameter_sweep.main()
         m.assert_called_once()
+
+
+def _ok_result():
+    return parameter_sweep.TrainingResult(
+        avg_hp=0.75, min_hp=0.6, avg_steps=20.0, hp_std=0.15, success=True
+    )
+
+
+class TestRunGridSearch:
+
+    def test_grid_search_runs_and_saves(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(parameter_sweep, "RESULTS_DIR", tmp_path)
+        with patch("parameter_sweep.run_training", return_value=_ok_result()) as rt:
+            parameter_sweep.run_grid_search()
+        assert rt.call_count == 6 * 3 * 4 * 3 * 3
+        assert (tmp_path / "parameter_sweep_results.csv").exists()
+        assert (tmp_path / "parameter_sweep_scatter.png").exists()
+        assert (tmp_path / "parameter_sweep_top10_bar.png").exists()
+
+
+class TestOptunaDrivers:
+
+    def test_run_general_optuna(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(parameter_sweep, "CONFIG_DIR", tmp_path)
+        with patch("parameter_sweep.run_training", return_value=_ok_result()):
+            parameter_sweep.run_general_optuna(n_trials=1, study_name="t_general")
+        assert (tmp_path / "best_t_general_params.json").exists()
+
+    def test_run_optuna_reward(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(parameter_sweep, "CONFIG_DIR", tmp_path)
+        with patch("parameter_sweep.run_training", return_value=_ok_result()):
+            parameter_sweep.run_optuna_reward_optimization(n_trials=1, study_name="t_reward")
+        assert (tmp_path / "best_t_reward_params.json").exists()
