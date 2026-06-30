@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from find_optimal_firing_angles import find_optimal_firing_angles
 
 
@@ -58,3 +59,35 @@ def test_moving_target_3d():
     assert np.isclose(azim, np.pi / 4, atol=0.2)
     assert np.isclose(elev, np.arctan2(1, np.sqrt(2)), atol=0.2)
     assert min_dist < 5.0
+
+
+def test_unsupported_ammo_raises():
+    shooter = np.array([0, 0, 0])
+    target = np.array([1000, 0, 0])
+    v_t = np.array([0, 0, 0])
+    with pytest.raises(ValueError):
+        find_optimal_firing_angles(shooter, target, v_t, 1000.0, "bogus_ammo")
+
+
+def test_fixed_mode_stationary():
+    shooter = np.array([0, 0, 0])
+    target = np.array([800, 0, 0])
+    v_t = np.array([0, 0, 0])
+    elev, azim, t, hit, min_dist = find_optimal_firing_angles(
+        shooter, target, v_t, 1000.0, "tpt", adaptive_mode="fixed"
+    )
+    assert t > 0
+    assert min_dist < 20.0
+    assert np.isclose(azim, 0, atol=0.2)
+
+
+def test_distance_adaptive_mode_stationary():
+    shooter = np.array([0, 0, 0])
+    target = np.array([800, 0, 0])
+    v_t = np.array([0, 0, 0])
+    elev, azim, t, hit, min_dist = find_optimal_firing_angles(
+        shooter, target, v_t, 1000.0, "tpt", adaptive_mode="distance_adaptive"
+    )
+    assert t > 0
+    assert min_dist < 20.0
+    assert np.isclose(azim, 0, atol=0.2)

@@ -5,17 +5,20 @@ Covers: select_action — greedy branch, random branch, device handling,
         output range, and boundary epsilon values.
 """
 
+import copy
 import random
 import sys
 import os
 
+import numpy as np
 import pytest
 import torch
+import torch.optim as optim
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rl_training.train.train_dqn_curriculum import select_action
-from rl_training.agents.dqn_components import DQN
+from rl_training.train.train_dqn_curriculum import select_action, _dqn_update_step
+from rl_training.agents.dqn_components import DQN, ReplayBuffer
 
 
 # ---------------------------------------------------------------------------
@@ -121,3 +124,40 @@ class TestSelectAction:
         action = select_action(state, net, epsilon=0.0,
                                action_dim=_ACTION_DIM, device=_DEVICE)
         assert 0 <= action < _ACTION_DIM
+
+
+def _fill_buffer(buf, n):
+    for i in range(n):
+        s = np.zeros(_STATE_DIM, dtype=np.float32)
+        ns = np.ones(_STATE_DIM, dtype=np.float32)
+        buf.push(s, i % _ACTION_DIM, float(i), ns, float(i == n - 1))
+
+
+class TestDqnUpdateStep:
+
+    def test_noop_when_buffer_too_small(self):
+        q = DQN(_STATE_DIM, _ACTION_DIM)
+        tgt = DQN(_STATE_DIM, _ACTION_DIM)
+        tgt.load_state_dict(q.state_dict())
+        opt = optim.Adam(q.parameters(), lr=1e-3)
+        buf = ReplayBuffer(capacity=100)
+        _fill_buffer(buf, 2)  # fewer than batch_size
+        before = copy.deepcopy(q.state_dict())
+        ret = _dqn_update_step(q, tgt, opt, buf, batch_size=4, gamma=0.99, device=_DEVICE)
+        assert ret is None
+        after = q.state_dict()
+        for k in before:
+            assert torch.equal(before[k], after[k])  # unchanged
+
+    def test_update_changes_parameters(self):
+        torch.manual_seed(0)
+        q = DQN(_STATE_DIM, _ACTION_DIM)
+        tgt = DQN(_STATE_DIM, _ACTION_DIM)
+        tgt.load_state_dict(q.state_dict())
+        opt = optim.Adam(q.parameters(), lr=1e-2)
+        buf = ReplayBuffer(capacity=100)
+        _fill_buffer(buf, 16)
+        before = copy.deepcopy(q.state_dict())
+        _dqn_update_step(q, tgt, opt, buf, batch_size=8, gamma=0.99, device=_DEVICE)
+        after = q.state_dict()
+        assert any(not torch.equal(before[k], after[k]) for k in before)

@@ -17,11 +17,18 @@ from unittest.mock import MagicMock, patch, PropertyMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 from evaluate_dqn_trajectories import (
     evaluate_trajectory,
     load_dqn_model,
     print_trajectory_summary,
+    plot_trajectory_results,
+    plot_individual_scenarios,
 )
+from rl_training.agents.dqn_components import DQN
 from rl_training.curriculum.scenario_generator import ScenarioParameters
 
 
@@ -233,3 +240,45 @@ class TestPrintTrajectorySummary:
         output = captured.getvalue()
         assert "2" in output          # total trajectories
         assert "1" in output          # trajectories with firing
+
+
+def _full_result(name="S", n=5, fired=2):
+    actions = [0] * (n - 1) + [1] if fired is not None else [0] * n
+    return {
+        "scenario_name": name,
+        "initial_range": 1500.0,
+        "steps": n,
+        "fired_at_step": fired,
+        "final_hp": 0.7,
+        "hp_trace": [0.1 * i for i in range(n + 1)],
+        "ranges": [1500.0 - 10 * i for i in range(n + 1)],
+        "target_positions": [(1500.0 - 10 * i, 0.0, 50.0) for i in range(n + 1)],
+        "cov_traces": [500.0 - 10 * i for i in range(n + 1)],
+        "actions": actions,
+        "rewards": [1.0] * n,
+    }
+
+
+class TestLoadDqnModelSuccess:
+
+    def test_loads_saved_state_dict(self, tmp_path):
+        import torch
+        net = DQN(14, 2)
+        p = tmp_path / "model.pth"
+        torch.save(net.state_dict(), p)
+        loaded = load_dqn_model(p, state_dim=14, action_dim=2, device=torch.device("cpu"))
+        assert isinstance(loaded, DQN)
+        assert loaded.training is False  # eval() was called
+
+
+class TestPlots:
+
+    def test_plot_trajectory_results_saves(self, tmp_path):
+        results = [_full_result("A"), _full_result("B", fired=None)]
+        out = tmp_path / "traj.png"
+        plot_trajectory_results(results, save_path=out)
+        assert out.exists()
+
+    def test_plot_individual_scenarios_saves(self, tmp_path):
+        plot_individual_scenarios([_full_result("Scn A")], plots_dir=str(tmp_path))
+        assert (tmp_path / "Scn_A.png").exists()

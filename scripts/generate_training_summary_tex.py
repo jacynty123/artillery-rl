@@ -69,12 +69,12 @@ def make_scenario_section(r: dict) -> str:
     lines = []
     lines.append(f"\\subsection*{{Scenario: {name}}}\n")
     lines.append("\\begin{itemize}\n")
-    lines.append(f"  \item Initial range: {initial_range:.0f} m\n")
-    lines.append(f"  \item Steps: {steps}\n")
-    lines.append(f"  \item Mean target velocity (x,y,z): {vel_str}\n")
-    lines.append(f"  \item Decision: {tex_escape(decision)}\n")
-    lines.append(f"  \item Conditions at decision/end: position=({pos_at_idx[0]:.0f},{pos_at_idx[1]:.0f},{pos_at_idx[2]:.0f}) m, range={range_at_idx:.0f} m, HP={hp_at_idx:.3f}\n")
-    lines.append(f"  \item {cov_note}\n")
+    lines.append(f"  \\item Initial range: {initial_range:.0f} m\n")
+    lines.append(f"  \\item Steps: {steps}\n")
+    lines.append(f"  \\item Mean target velocity (x,y,z): {vel_str}\n")
+    lines.append(f"  \\item Decision: {tex_escape(decision)}\n")
+    lines.append(f"  \\item Conditions at decision/end: position=({pos_at_idx[0]:.0f},{pos_at_idx[1]:.0f},{pos_at_idx[2]:.0f}) m, range={range_at_idx:.0f} m, HP={hp_at_idx:.3f}\n")
+    lines.append(f"  \\item {cov_note}\n")
     lines.append("\\end{itemize}\n\n")
 
     # Small table: first and last 5 HP samples

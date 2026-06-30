@@ -274,3 +274,50 @@ class TestIntegrationHitProbability:
         assert 0.0 <= prob <= 1.0
         # Given the scenario, should be relatively low but non-zero
         assert prob >= 0.0
+
+
+import io
+import contextlib
+
+
+def _make_error_prop():
+    ammo = AmmoParameters.create_tpt_ammo()
+    return ErrorPropagation(AdvancedProjectileMotion(ammo))
+
+
+def test_propagate_target_covariance_shape_error():
+    ep = _make_error_prop()
+    with pytest.raises(ValueError):
+        ep.propagate_target_covariance(np.eye(3), impact_time=2.0)
+
+
+def test_propagate_target_covariance_zero_vertical():
+    ep = _make_error_prop()
+    out = ep.propagate_target_covariance(
+        np.eye(6), impact_time=2.0, include_vertical_velocity=False
+    )
+    assert out.shape == (3, 3)
+    # x variance = 1 + t^2 * 1 = 5; z variance has vz mapping zeroed -> 1
+    assert np.isclose(out[0, 0], 5.0)
+    assert np.isclose(out[2, 2], 1.0)
+
+
+def test_propagate_target_covariance_with_vertical():
+    ep = _make_error_prop()
+    out = ep.propagate_target_covariance(
+        np.eye(6), impact_time=2.0, include_vertical_velocity=True
+    )
+    assert out.shape == (3, 3)
+    assert np.isclose(out[2, 2], 5.0)
+
+
+def test_validate_jacobian_returns_metrics():
+    ep = _make_error_prop()
+    # validate_jacobian prints emoji; redirect stdout to avoid console encoding issues.
+    with contextlib.redirect_stdout(io.StringIO()):
+        res = ep.validate_jacobian(impact_time=2.0)
+    assert "max_absolute_error" in res
+    assert "validation_passed" in res
+    assert res["analytical_jacobian"].shape == (8, 8)
+    assert res["numerical_jacobian"].shape == (8, 8)
+    assert isinstance(res["problematic_elements"], int)

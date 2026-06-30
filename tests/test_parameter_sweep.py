@@ -147,3 +147,27 @@ class TestRunTraining:
         assert captured_config["epsilon_decay_steps"] == 500
         assert captured_config["reward_excellent"] == 100.0
         assert captured_config["time_penalty_factor"] == -100.0
+
+
+import parameter_sweep
+
+
+class TestMainDispatch:
+
+    def test_grid_mode(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog", "--mode", "grid"])
+        with patch("parameter_sweep.run_grid_search") as m:
+            parameter_sweep.main()
+        m.assert_called_once()
+
+    def test_optuna_mode(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog", "--mode", "optuna", "--trials", "3"])
+        with patch("parameter_sweep.run_general_optuna") as m:
+            parameter_sweep.main()
+        m.assert_called_once()
+
+    def test_reward_optuna_mode(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog", "--mode", "reward_optuna", "--trials", "2"])
+        with patch("parameter_sweep.run_optuna_reward_optimization") as m:
+            parameter_sweep.main()
+        m.assert_called_once()
