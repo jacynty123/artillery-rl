@@ -333,11 +333,11 @@ def main(num_runs: int = 1):
         return
 
     scenarios_to_test = [
-        curriculum.get_scenario_by_index(0),   # Static_Close
-        curriculum.get_scenario_by_index(4),   # Fast_Approach_Long
-        curriculum.get_scenario_by_index(6),   # Very_Fast_Approach
-        curriculum.get_scenario_by_index(11),  # ExtremeLong_Medium_Slow
-        curriculum.get_scenario_by_index(13),  # ExtremeLong_Medium_Approaching
+        curriculum.get_scenario_by_index(0),   # Static_Close (800m)
+        curriculum.get_scenario_by_index(4),   # Fast_Approach_Long (3000m)
+        curriculum.get_scenario_by_index(6),   # Medium_Approach (2000m)
+        curriculum.get_scenario_by_index(11),  # Complex_3D_Motion (1800m)
+        curriculum.get_scenario_by_index(13),  # ExtremeLong_Large_Lateral (3000m)
     ]
 
     def perturb_scenario(scenario, rng):
@@ -464,8 +464,8 @@ def main(num_runs: int = 1):
     plot_trajectory_results(last_results, save_path=str(results_dir / "trajectory_evaluation.png"))
     plot_individual_scenarios(last_results, plots_dir=str(results_dir / "scenario_plots"))
 
-    print("\n🎯 Evaluation complete!")
-    print("📊 Trajectory plots saved to: trajectory_evaluation.png")
-    print("📊 Individual scenario plots saved to: scenario_plots/ directory")
+    print("\n[OK] Evaluation complete!")
+    print("Trajectory plots saved to: trajectory_evaluation.png")
+    print("Individual scenario plots saved to: scenario_plots/ directory")
 if __name__ == "__main__":
     main()

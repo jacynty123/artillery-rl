@@ -53,76 +53,83 @@ class EnvironmentState:
     initial_hit_probability: float = 0.0  # Track initial hit probability for reward shaping
     covariance_trace: float = 1000.0  # Kalman filter convergence indicator
     hp_history: list = None  # Track HP history for plateau detection
-    
+    target_position_est: np.ndarray = None  # Estimated 3D position from Kalman filter
+    target_velocity_est: np.ndarray = None  # Estimated 3D velocity from Kalman filter
+    initial_range_est: float = None  # Estimated range at episode start
+
     def __post_init__(self):
-        """Initialize hp_history if not provided."""
+        """Initialize hp_history and estimated state if not provided."""
         if self.hp_history is None:
             self.hp_history = []
+        if self.target_position_est is None:
+            x0 = getattr(self.scenario, 'target_x0', self.scenario.range_m)
+            y0 = getattr(self.scenario, 'target_y0', 0.0)
+            z0 = getattr(self.scenario, 'target_z0', 50.0)
+            self.target_position_est = np.array([x0, y0, z0], dtype=np.float32)
+        if self.target_velocity_est is None:
+            self.target_velocity_est = np.array([
+                self.scenario.target_vx,
+                self.scenario.target_vy,
+                self.scenario.target_vz
+            ], dtype=np.float32)
+        if self.initial_range_est is None:
+            self.initial_range_est = float(np.linalg.norm(self.target_position_est))
 
     def to_array(self) -> np.ndarray:
-        """Convert current state to neural network input array."""
-        # Calculate CURRENT engagement state based on elapsed time
-        elapsed_time = self.scenario.tracking_duration - self.time_remaining
-        
-        # Current target state (estimated position and velocity)
-        # Use scenario initial position and velocity for correct 3D motion
-        x0 = getattr(self.scenario, 'target_x0', self.scenario.range_m)
-        y0 = getattr(self.scenario, 'target_y0', 0.0)
-        z0 = getattr(self.scenario, 'target_z0', 0.0)
-        current_x = x0 + self.scenario.target_vx * elapsed_time
-        current_y = y0 + self.scenario.target_vy * elapsed_time
-        current_z = z0 + self.scenario.target_vz * elapsed_time
-        current_pos = np.array([current_x, current_y, current_z])
-        current_range = np.linalg.norm(current_pos)
-        current_vx = self.scenario.target_vx  # Current x velocity
-        current_vy = self.scenario.target_vy  # Current y velocity
-        current_vz = self.scenario.target_vz  # Current z velocity
-        
-        # Range change from initial position
-        range_change = current_range - self.scenario.range_m
-        
-        # Speed magnitude
-        speed_magnitude = np.sqrt(current_vx**2 + current_vy**2 + current_vz**2)
-        
-        # Engagement geometry
+        """Convert current state to neural network input array using Kalman filter estimates."""
+        # Use Kalman filter estimated position and velocity
+        current_pos = np.asarray(self.target_position_est, dtype=np.float32)
+        current_vel = np.asarray(self.target_velocity_est, dtype=np.float32)
 
-        heading_angle = np.arctan2(current_vy, current_vx) / np.pi  # Normalized to [-1, 1]
-        # Closure rate: use true radial velocity (component along line of sight)
-        shooter_pos = np.array([0.0, 0.0, 0.0])
+        current_range = float(np.linalg.norm(current_pos))
+        current_vx = float(current_vel[0])
+        current_vy = float(current_vel[1])
+        current_vz = float(current_vel[2])
+
+        # Range change from initial estimated position
+        range_change = current_range - self.initial_range_est
+
+        # Speed magnitude from estimated velocity
+        speed_magnitude = float(np.linalg.norm(current_vel))
+
+        # Engagement geometry from estimated state
+        heading_angle = float(np.arctan2(current_vy, current_vx) / np.pi)  # Normalized to [-1, 1]
+
+        # Closure rate: line-of-sight radial velocity component from estimated state
+        shooter_pos = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         r_vec = current_pos - shooter_pos
         r_unit = r_vec / (np.linalg.norm(r_vec) + 1e-8)
-        v_vec = np.array([current_vx, current_vy, current_vz])
-        radial_velocity = np.dot(v_vec, r_unit)
+        radial_velocity = float(np.dot(current_vel, r_unit))
         closure_rate = abs(radial_velocity) / 100.0  # Normalized closure indicator
-        
-        # Agent observes current state to learn timing decisions:
+
+        # Agent observes estimated state and filter uncertainty to learn timing decisions:
         # - Kalman convergence (when to fire after filter stabilizes)
         # - Range optimization (wait for better engagement geometry)  
         # - Time pressure (don't wait too long)
         return np.array([
-            # 1. Range information (critical for range optimization)
-            current_range / 5000.0,  # Current range, normalized [0-5km]
-            range_change / 1000.0,    # Range change from initial, normalized
-            
+            # 1. Range information (from Kalman filter state)
+            current_range / 5000.0,  # Current estimated range, normalized [0-5km]
+            range_change / 1000.0,    # Range change from initial estimate, normalized
+
             # 2. Target characteristics (static)
             self.scenario.target_length / 20.0,
             self.scenario.target_width / 20.0,
             self.scenario.target_height / 20.0,
-            
-            # 3. CURRENT motion state (enables learning range optimization)
-            (current_vx + 50.0) / 100.0,  # Radial velocity (approaching = negative)
-            (current_vy + 50.0) / 100.0,  # Lateral velocity
-            (current_vz + 50.0) / 100.0,  # Vertical velocity
-            speed_magnitude / 100.0,      # Speed magnitude
-            
+
+            # 3. Motion state (from Kalman filter estimated velocity)
+            (current_vx + 50.0) / 100.0,  # Estimated radial/x velocity
+            (current_vy + 50.0) / 100.0,  # Estimated lateral/y velocity
+            (current_vz + 50.0) / 100.0,  # Estimated vertical/z velocity
+            speed_magnitude / 100.0,      # Estimated speed magnitude
+
             # 4. Time and convergence
             self.time_remaining / self.scenario.tracking_duration,  # Time remaining
             self.episode_step / 100.0,                             # Step count
             min(1.0, self.covariance_trace / 1000.0),              # Kalman convergence
-            
-            # 5. Engagement geometry (helps distinguish decision patterns)
-            heading_angle,                    # Target heading angle
-            min(1.0, closure_rate),          # Closure rate indicator
+
+            # 5. Engagement geometry (from Kalman filter state)
+            heading_angle,                    # Estimated target heading angle
+            min(1.0, closure_rate),          # Estimated closure rate indicator
         ], dtype=np.float32)
 
 
@@ -154,10 +161,16 @@ def hp_worker(args):
     env_state.episode_step = step
     hp_value = calculate_hp_func(scenario)
     cov_trace = getattr(env_state, 'covariance_trace', 1000.0)
+    pos_est = getattr(env_state, 'target_position_est', None)
+    vel_est = getattr(env_state, 'target_velocity_est', None)
+    if pos_est is None:
+        pos_est = np.array([scenario.range_m, 0.0, 50.0], dtype=np.float32)
+    if vel_est is None:
+        vel_est = np.array([scenario.target_vx, scenario.target_vy, scenario.target_vz], dtype=np.float32)
     # Restore state
     env_state.time_remaining = old_time
     env_state.episode_step = old_step
-    return (step, hp_value, cov_trace)
+    return (step, hp_value, cov_trace, pos_est, vel_est)
 
 
 class ArtilleryFiringEnv(gym.Env):
@@ -356,11 +369,19 @@ class ArtilleryFiringEnv(gym.Env):
         # Cache trajectories for identical scenarios to avoid recomputation
         cache_key = self._get_cache_key(scenario, seed=seed)
         if cache_key in self.hp_cache:
-            self.hp_trajectory, self.cov_trajectory = self.hp_cache[cache_key]
+            cache_entry = self.hp_cache[cache_key]
+            if len(cache_entry) == 4:
+                self.hp_trajectory, self.cov_trajectory, self.pos_trajectory, self.vel_trajectory = cache_entry
+            else:
+                self.hp_trajectory, self.cov_trajectory = cache_entry[:2]
+                self.pos_trajectory = {s: np.array([scenario.range_m, 0.0, 50.0], dtype=np.float32) for s in self.hp_trajectory}
+                self.vel_trajectory = {s: np.array([scenario.target_vx, scenario.target_vy, scenario.target_vz], dtype=np.float32) for s in self.hp_trajectory}
         else:
             # Calculate new trajectory in parallel
             self.hp_trajectory = {}  # {step: hp_value}
             self.cov_trajectory = {}  # {step: cov_trace}
+            self.pos_trajectory = {}  # {step: target_position_est}
+            self.vel_trajectory = {}  # {step: target_velocity_est}
             hp_sample_interval = 1  # Calculate every step for accuracy
             steps = list(range(0, self.max_episode_steps + 1, hp_sample_interval))
 
@@ -371,17 +392,29 @@ class ArtilleryFiringEnv(gym.Env):
             ]
             with concurrent.futures.ProcessPoolExecutor() as executor:
                 results = list(executor.map(hp_worker, worker_args))
-            for step, hp_value, cov_trace in results:
+            for step, hp_value, cov_trace, pos_est, vel_est in results:
                 self.hp_trajectory[step] = hp_value
                 self.cov_trajectory[step] = cov_trace
+                self.pos_trajectory[step] = pos_est
+                self.vel_trajectory[step] = vel_est
             # Cache for future use
-            self.hp_cache[cache_key] = (self.hp_trajectory.copy(), self.cov_trajectory.copy())
+            self.hp_cache[cache_key] = (
+                self.hp_trajectory.copy(),
+                self.cov_trajectory.copy(),
+                self.pos_trajectory.copy(),
+                self.vel_trajectory.copy(),
+            )
             print(f"Cache MISS -> computed {scenario.name}")
         # Set initial values
         initial_hit_prob = self.hp_trajectory[0]
         self.current_state.current_hit_probability = initial_hit_prob
         self.current_state.initial_hit_probability = initial_hit_prob
         self.current_state.covariance_trace = self.cov_trajectory[0]
+        if hasattr(self, 'pos_trajectory') and 0 in self.pos_trajectory:
+            self.current_state.target_position_est = self.pos_trajectory[0]
+            self.current_state.initial_range_est = float(np.linalg.norm(self.pos_trajectory[0]))
+        if hasattr(self, 'vel_trajectory') and 0 in self.vel_trajectory:
+            self.current_state.target_velocity_est = self.vel_trajectory[0]
         self.current_state.hp_history = [initial_hit_prob]  # Initialize HP history
         self.episode_reward = 0.0
         self.episode_length = 0
@@ -479,6 +512,10 @@ class ArtilleryFiringEnv(gym.Env):
         hp = self.hp_trajectory[self.current_state.episode_step]
         self.current_state.current_hit_probability = hp
         self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
+        if hasattr(self, 'pos_trajectory') and self.current_state.episode_step in self.pos_trajectory:
+            self.current_state.target_position_est = self.pos_trajectory[self.current_state.episode_step]
+        if hasattr(self, 'vel_trajectory') and self.current_state.episode_step in self.vel_trajectory:
+            self.current_state.target_velocity_est = self.vel_trajectory[self.current_state.episode_step]
         self.current_state.hp_history.append(hp)
         reward = self._calculate_firing_reward(hp, self.current_state.episode_step)
         if self.debug:
@@ -494,6 +531,10 @@ class ArtilleryFiringEnv(gym.Env):
         hp = self.hp_trajectory[self.current_state.episode_step]
         self.current_state.current_hit_probability = hp
         self.current_state.covariance_trace = self.cov_trajectory[self.current_state.episode_step]
+        if hasattr(self, 'pos_trajectory') and self.current_state.episode_step in self.pos_trajectory:
+            self.current_state.target_position_est = self.pos_trajectory[self.current_state.episode_step]
+        if hasattr(self, 'vel_trajectory') and self.current_state.episode_step in self.vel_trajectory:
+            self.current_state.target_velocity_est = self.vel_trajectory[self.current_state.episode_step]
         self.current_state.hp_history.append(hp)
         if len(self.current_state.hp_history) > self.hp_history_length:
             self.current_state.hp_history.pop(0)
@@ -611,6 +652,8 @@ class ArtilleryFiringEnv(gym.Env):
         # Store for observation (will be added to state)
         if self.current_state is not None:
             self.current_state.covariance_trace = covariance_trace
+            self.current_state.target_position_est = target_position.copy()
+            self.current_state.target_velocity_est = target_velocity.copy()
 
         # Collect debug info
         debug_info = {

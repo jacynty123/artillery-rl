@@ -568,3 +568,32 @@ class TestArtilleryFiringEnv:
         """range <= 2500 → 40 (default)."""
         s = self._make_scenario(range_m=1000.0, target_vx=0.0)
         assert self.env._calculate_max_steps(s) == 40
+
+    def test_to_array_uses_kalman_estimates(self):
+        """Verify that to_array() computes observations from estimated state, not ground truth."""
+        scenario = self._make_scenario(range_m=2000.0, target_vx=-30.0)
+        # Create state where estimated pos/vel differs from scenario ground truth
+        state = EnvironmentState(
+            scenario=scenario,
+            time_remaining=10.0,
+            current_hit_probability=0.5,
+            episode_step=0,
+            target_position_est=np.array([2100.0, 50.0, 60.0], dtype=np.float32),
+            target_velocity_est=np.array([-25.0, 10.0, 2.0], dtype=np.float32),
+            initial_range_est=2100.0,
+            covariance_trace=350.0,
+        )
+        arr = state.to_array()
+        assert arr.shape == (14,)
+        # Range is computed from estimated pos norm: sqrt(2100^2 + 50^2 + 60^2)
+        expected_range = np.linalg.norm([2100.0, 50.0, 60.0])
+        assert arr[0] == pytest.approx(expected_range / 5000.0)
+        # Velocities are from target_velocity_est
+        assert arr[5] == pytest.approx((-25.0 + 50.0) / 100.0)
+        assert arr[6] == pytest.approx((10.0 + 50.0) / 100.0)
+        assert arr[7] == pytest.approx((2.0 + 50.0) / 100.0)
+        # Covariance trace
+        assert arr[11] == pytest.approx(350.0 / 1000.0)
+        # Heading from estimated velocity
+        expected_heading = np.arctan2(10.0, -25.0) / np.pi
+        assert arr[12] == pytest.approx(expected_heading)

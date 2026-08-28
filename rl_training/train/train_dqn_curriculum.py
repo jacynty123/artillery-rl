@@ -20,9 +20,9 @@ except ImportError:
     import sys
     import os
 
-    # Add parent directory to path
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, parent_dir)
+    # Add project root directory to path
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, project_root)
     # Import from the rl_training package
     from rl_training.environment import ArtilleryFiringEnv, Action
     from rl_training.curriculum.curriculum_scenarios import CurriculumScenarios
