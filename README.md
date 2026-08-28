@@ -124,6 +124,37 @@ python scripts/hit_probability_scenarios.py
 tensorboard --logdir=./logs/
 ```
 
+## Multi-gun engagements (preview)
+
+Compute firing solutions and hit probabilities for a **battery of N guns** against a
+single target — pure ballistics, no RL agent. The number of guns is a parameter:
+
+```bash
+# 3 guns spaced 50 m apart along the firing line, target at 1000 m
+python scripts/battery_firing_solution.py --num_guns 3 --range 1000
+
+# Single gun (equivalent to the original single-shooter setup)
+python scripts/battery_firing_solution.py --num_guns 1
+```
+
+Prints a per-gun table (position, range, elevation, azimuth, feasibility, hit
+probability) and the **combined salvo kill probability** `1 - Π(1 - HP_i)` over the
+feasible guns — e.g. three guns at ~0.15 each combine to ~0.41:
+
+```
+Gun  Position(x,y,z)      Range    Elev     Azim     Feasible  HP
+0    (0,-50,0)            1006     6.0      2.9      yes       0.140
+1    (0,0,0)              1005     6.1      -0.0     yes       0.182
+2    (0,50,0)             1006     6.0      -2.9     yes       0.160
+Combined salvo kill probability (feasible guns): 0.409
+```
+
+Options: `--num_guns`, `--spacing`, `--axis {x,y,z}`, `--range`, `--target_y`,
+`--target_z`, `--target_vx/vy/vz`, `--ammo`, `--muzzle_velocity`, `--n_samples`.
+
+> Training an RL policy that *controls* a battery (multi-target assignment) is planned —
+> see [docs/MULTI_TARGET_MULTI_GUN_PLAN.md](docs/MULTI_TARGET_MULTI_GUN_PLAN.md).
+
 ## Testing
 
 ```bash
@@ -146,7 +177,8 @@ scripts/
 ├── evaluate_dqn_trajectories.py  # Model evaluation (single & multi-run)
 ├── generate_training_summary.py  # Markdown report
 ├── generate_training_summary_tex.py  # LaTeX report
-└── hit_probability_scenarios.py  # Standalone ballistics scenario analysis
+├── hit_probability_scenarios.py  # Standalone ballistics scenario analysis
+└── battery_firing_solution.py    # Multi-gun firing solutions & hit probability
 config/                           # Saved best parameter sets
 results/                          # Evaluation CSVs and plots
 reports/                          # Generated reports

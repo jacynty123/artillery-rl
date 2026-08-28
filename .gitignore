@@ -8,6 +8,8 @@ __pycache__/
 venv/
 ENV/
 env/
+docs/paper1_AiMT_docx/
+docs/AiMT.template.v.01/
 
 # Jupyter
 .ipynb_checkpoints/
