@@ -27,14 +27,15 @@ test_experiments/
 *.db
 
 # Evaluation results and images
+results/
 evaluation_*.json
 evaluation_*.csv
 evaluation_*.png
 *_histogram.png
 *_boxplot.png
 *_evaluation.png
-scenario_plots/
-scenario_plots_first_run/
+/scenario_plots/
+/scenario_plots_first_run/
 reports/
 *.pth
 
