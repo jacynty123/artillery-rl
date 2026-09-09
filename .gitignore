@@ -39,6 +39,13 @@ evaluation_*.png
 reports/
 *.pth
 
+# Whitelist published paper reproducibility artifacts
+!results/
+!results/**
+!rl_training/models/
+!rl_training/models/checkpoints/
+!rl_training/models/checkpoints/dqn_curriculum_phase4.pth
+
 # VS Code
 .vscode/
 

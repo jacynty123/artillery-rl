@@ -47,25 +47,39 @@ def evaluate_trajectory(env, q_network, scenario, device, max_steps=100, seed=No
     done = False
     step_count = 0
     fired_at_step = None
-    initial_range = scenario.range_m
+    firing_range = None
+    firing_pos = None
+
+    initial_x = float(scenario.range_m)
     initial_y = 0.0  # Target starts at y=0
     initial_z = 50.0  # Target starts at z=50m
+    initial_slant_range = float(np.sqrt(initial_x**2 + initial_y**2 + initial_z**2))
 
-    # Record initial HP and covariance
+    # Record initial HP, covariance, slant range, and position (step 0 before step)
     hp_trace.append(env.current_state.current_hit_probability)
     cov_traces.append(env.current_state.covariance_trace)
-    ranges.append(initial_range)
-    target_positions.append((initial_range, initial_y, initial_z))
+    ranges.append(initial_slant_range)
+    target_positions.append((initial_x, initial_y, initial_z))
 
     while not done and step_count < max_steps:
+        # Calculate target position and 3D slant range at decision step before action
+        elapsed_time = step_count * (scenario.tracking_duration / env.max_episode_steps)
+        current_x = initial_x + scenario.target_vx * elapsed_time
+        current_y = initial_y + scenario.target_vy * elapsed_time
+        current_z = initial_z + scenario.target_vz * elapsed_time
+        current_slant_range = float(np.sqrt(current_x**2 + current_y**2 + current_z**2))
+        current_pos = (current_x, current_y, current_z)
+
         # Get action from Q-network
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             action = q_network(state_tensor).argmax().item()
 
-        # Record firing decision
+        # Record firing decision and exact 3D slant range at decision moment
         if action == 1 and fired_at_step is None:  # FIRE action
             fired_at_step = step_count
+            firing_range = current_slant_range
+            firing_pos = current_pos
 
         # Step environment
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -75,13 +89,14 @@ def evaluate_trajectory(env, q_network, scenario, device, max_steps=100, seed=No
         actions.append(action)
         rewards.append(reward)
 
-        # Calculate current range and full target position
-        elapsed_time = step_count * (scenario.tracking_duration / env.max_episode_steps)
-        current_x = initial_range + scenario.target_vx * elapsed_time
-        current_y = initial_y + scenario.target_vy * elapsed_time
-        current_z = initial_z + scenario.target_vz * elapsed_time
-        ranges.append(current_x)
-        target_positions.append((current_x, current_y, current_z))
+        # Calculate target position and 3D slant range after step
+        next_time = (step_count + 1) * (scenario.tracking_duration / env.max_episode_steps)
+        next_x = initial_x + scenario.target_vx * next_time
+        next_y = initial_y + scenario.target_vy * next_time
+        next_z = initial_z + scenario.target_vz * next_time
+        next_slant_range = float(np.sqrt(next_x**2 + next_y**2 + next_z**2))
+        ranges.append(next_slant_range)
+        target_positions.append((next_x, next_y, next_z))
 
         # Record HP and covariance after step
         hp_trace.append(info["hit_probability"])
@@ -98,9 +113,12 @@ def evaluate_trajectory(env, q_network, scenario, device, max_steps=100, seed=No
         'target_positions': target_positions,
         'cov_traces': cov_traces,
         'fired_at_step': fired_at_step,
+        'firing_range': firing_range,
+        'firing_pos': firing_pos,
         'final_hp': hp_trace[-1] if hp_trace else 0.0,
         'scenario_name': scenario.name,
-        'initial_range': initial_range,
+        'initial_range': initial_x,
+        'initial_slant_range': initial_slant_range,
         'steps': step_count
     }
 
@@ -269,14 +287,16 @@ def print_trajectory_summary(results):
 
     for result in results:
         fired_step = result['fired_at_step']
-        if fired_step is not None and fired_step < len(result['ranges']):
-            fire_range = result['ranges'][fired_step]
-            fire_pos = result['target_positions'][fired_step]
-            pos_str = f"({fire_pos[0]:.0f},{fire_pos[1]:.0f},{fire_pos[2]:.0f})"
-        else:
-            fire_range = result['ranges'][-1] if result['ranges'] else 0.0
-            fire_pos = result['target_positions'][-1] if result['target_positions'] else (0.0, 0.0, 0.0)
-            pos_str = f"({fire_pos[0]:.0f},{fire_pos[1]:.0f},{fire_pos[2]:.0f})"
+        fire_range = result.get('firing_range')
+        fire_pos = result.get('firing_pos')
+        if fire_range is None:
+            if fired_step is not None and fired_step < len(result['ranges']):
+                fire_range = result['ranges'][fired_step]
+                fire_pos = result['target_positions'][fired_step]
+            else:
+                fire_range = result['ranges'][-1] if result['ranges'] else 0.0
+                fire_pos = result['target_positions'][-1] if result['target_positions'] else (0.0, 0.0, 0.0)
+        pos_str = f"({fire_pos[0]:.0f},{fire_pos[1]:.0f},{fire_pos[2]:.0f})"
 
         print(f"{result['scenario_name']:<25} "
               f"{result['initial_range']:<12.0f} "
@@ -374,7 +394,9 @@ def main(num_runs: int = 1):
     # Print detailed summary
     print_trajectory_summary(results)
 
+    import json
     import pandas as pd
+    from scipy import stats as sp_stats
 
     # Flatten all results into a single list with run/seed columns
     flat_rows = []
@@ -386,6 +408,7 @@ def main(num_runs: int = 1):
                 'scenario_name': r['scenario_name'],
                 'final_hp': float(r['final_hp']),
                 'fired_at_step': r['fired_at_step'],
+                'firing_range': float(r['firing_range']) if r.get('firing_range') is not None else np.nan,
                 'steps': r['steps'],
                 'initial_range': float(r['initial_range']),
             })
@@ -396,49 +419,71 @@ def main(num_runs: int = 1):
     if num_runs == 1:
         print_trajectory_summary(last_results)
 
+    def calc_ci95(series):
+        """Calculate 95% confidence interval half-width using Student's t distribution."""
+        valid = series.dropna()
+        n = len(valid)
+        if n < 2:
+            return 0.0
+        sem = valid.std() / np.sqrt(n)
+        t_crit = sp_stats.t.ppf(0.975, df=n - 1)
+        return float(t_crit * sem)
+
     # Multi-run statistics table
     if num_runs > 1:
         stats = (
             df_all.groupby('scenario_name')
             .agg(
-                mean_final_hp  =('final_hp', 'mean'),
-                std_final_hp   =('final_hp', 'std'),
-                min_final_hp   =('final_hp', 'min'),
-                max_final_hp   =('final_hp', 'max'),
-                mean_fired_step=('fired_at_step', 'mean'),
-                std_fired_step =('fired_at_step', 'std'),
-                firing_rate    =('fired_at_step', lambda x: x.notna().mean() * 100),
+                mean_final_hp   =('final_hp', 'mean'),
+                std_final_hp    =('final_hp', 'std'),
+                min_final_hp    =('final_hp', 'min'),
+                max_final_hp    =('final_hp', 'max'),
+                ci95_final_hp   =('final_hp', calc_ci95),
+                mean_fired_step =('fired_at_step', 'mean'),
+                std_fired_step  =('fired_at_step', 'std'),
+                ci95_fired_step =('fired_at_step', calc_ci95),
+                mean_firing_range=('firing_range', 'mean'),
+                std_firing_range =('firing_range', 'std'),
+                min_firing_range =('firing_range', 'min'),
+                max_firing_range =('firing_range', 'max'),
+                ci95_firing_range=('firing_range', calc_ci95),
+                firing_rate     =('fired_at_step', lambda x: x.notna().mean() * 100),
             )
             .reset_index()
         )
         # Coefficient of variation (%) — std / mean * 100, meaningful robustness metric
         stats['cv_pct'] = (stats['std_final_hp'] / stats['mean_final_hp'] * 100).round(1)
+        stats['cv_range_pct'] = (stats['std_firing_range'] / stats['mean_firing_range'] * 100).round(1)
 
         # ---- pretty console table ----
-        col_w = [28, 8, 8, 7, 7, 10, 10, 8, 7]
-        headers = ['Scenario', 'Mean HP', 'Std HP', 'Min', 'Max',
-                   'Mean Step', 'Std Step', 'Fire%', 'CV%']
+        col_w = [28, 8, 8, 8, 10, 10, 8, 12, 12, 7, 7]
+        headers = ['Scenario', 'Mean HP', 'Std HP', '95% CI',
+                   'Mean Step', 'Std Step', 'Fire%', 'Mean Range', 'Std Range', 'CV%', 'R_CV%']
         sep = '+' + '+'.join('-' * w for w in col_w) + '+'
         hdr = '|' + '|'.join(h.center(w) for h, w in zip(headers, col_w)) + '|'
 
-        print(f"\n{'='*70}")
+        print(f"\n{'='*95}")
         print(f"ROBUSTNESS STATISTICS  ({num_runs} runs, seeds 0–{num_runs-1})")
         print(f"Parameter perturbations: range ±5%, velocity ±10%, noise ±20%")
-        print(f"{'='*70}")
+        print(f"{'='*95}")
         print(sep); print(hdr); print(sep)
         for _, row in stats.iterrows():
             fired_step_mean = f"{row['mean_fired_step']:.1f}" if pd.notna(row['mean_fired_step']) else '—'
             fired_step_std  = f"{row['std_fired_step']:.1f}"  if pd.notna(row['std_fired_step'])  else '—'
+            range_mean = f"{row['mean_firing_range']:.1f}" if pd.notna(row['mean_firing_range']) else '—'
+            range_std  = f"{row['std_firing_range']:.1f}"  if pd.notna(row['std_firing_range'])  else '—'
             vals = [
                 row['scenario_name'][:col_w[0]-2],
                 f"{row['mean_final_hp']:.3f}",
                 f"{row['std_final_hp']:.3f}",
-                f"{row['min_final_hp']:.3f}",
-                f"{row['max_final_hp']:.3f}",
+                f"±{row['ci95_final_hp']:.3f}",
                 fired_step_mean,
                 fired_step_std,
                 f"{row['firing_rate']:.0f}",
+                range_mean,
+                range_std,
                 f"{row['cv_pct']:.1f}",
+                f"{row['cv_range_pct']:.1f}",
             ]
             print('|' + '|'.join(v.center(w) for v, w in zip(vals, col_w)) + '|')
         print(sep)
@@ -459,6 +504,25 @@ def main(num_runs: int = 1):
     results_dir.mkdir(exist_ok=True)
     df_all.to_csv(results_dir / "evaluation_summary.csv", index=False)
     print(f"All results saved to {results_dir / 'evaluation_summary.csv'}")
+
+    # Save evaluation_details.json with last_results (or representative runs)
+    details_data = []
+    for r in last_results:
+        details_data.append({
+            'scenario_name': r['scenario_name'],
+            'initial_range': float(r['initial_range']),
+            'steps': int(r['steps']),
+            'fired_at_step': int(r['fired_at_step']) if r['fired_at_step'] is not None else None,
+            'final_hp': float(r['final_hp']),
+            'firing_range': float(r['firing_range']) if r.get('firing_range') is not None else None,
+            'ranges': [float(x) for x in r.get('ranges', [])],
+            'target_positions': [[float(c) for c in pos] for pos in r.get('target_positions', [])],
+            'hp_trace': [float(x) for x in r.get('hp_trace', [])],
+            'cov_traces': [float(x) if x is not None else None for x in r.get('cov_traces', [])],
+        })
+    with open(results_dir / "evaluation_details.json", "w") as f:
+        json.dump(details_data, f, indent=2)
+    print(f"Evaluation details saved to {results_dir / 'evaluation_details.json'}")
 
     # Plots based on last run
     plot_trajectory_results(last_results, save_path=str(results_dir / "trajectory_evaluation.png"))

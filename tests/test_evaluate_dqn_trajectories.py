@@ -128,7 +128,7 @@ class TestEvaluateTrajectory:
         assert required.issubset(result.keys())
 
     def test_fire_action_recorded(self):
-        """fired_at_step is set on the first FIRE action (action==1)."""
+        """fired_at_step and firing_range are set on the first FIRE action (action==1)."""
         scenario = _make_scenario()
         env = _make_env_mock(hp_values=[0.5, 0.8, 0.9])
         q_net = _make_q_network([0, 1, 0])  # FIRE at step 1
@@ -138,9 +138,11 @@ class TestEvaluateTrajectory:
             result = evaluate_trajectory(env, q_net, scenario, device="cpu", max_steps=10)
 
         assert result["fired_at_step"] == 1
+        assert result["firing_range"] is not None
+        assert result["firing_pos"] is not None
 
     def test_no_fire_action(self):
-        """fired_at_step is None when agent never fires."""
+        """fired_at_step and firing_range are None when agent never fires."""
         scenario = _make_scenario()
         env = _make_env_mock(hp_values=[0.3, 0.4, 0.5])
         q_net = _make_q_network([0, 0, 0])  # all HOLD
@@ -150,6 +152,8 @@ class TestEvaluateTrajectory:
             result = evaluate_trajectory(env, q_net, scenario, device="cpu", max_steps=10)
 
         assert result["fired_at_step"] is None
+        assert result["firing_range"] is None
+        assert result["firing_pos"] is None
 
     def test_final_hp_matches_last_step(self):
         """final_hp equals the last hit_probability returned by env.step."""
@@ -165,7 +169,7 @@ class TestEvaluateTrajectory:
         assert abs(result["final_hp"] - hp_values[-1]) < 1e-9
 
     def test_ranges_computed_from_velocity(self):
-        """ranges are computed using scenario.target_vx and elapsed time."""
+        """ranges are computed using 3D slant range from artillery origin."""
         vx = -20.0  # approaching
         scenario = _make_scenario(range_m=2000.0, vx=vx)
         env = _make_env_mock(hp_values=[0.5, 0.6])
@@ -176,8 +180,9 @@ class TestEvaluateTrajectory:
         with patch("torch.no_grad", return_value=MagicMock(__enter__=lambda s: s, __exit__=lambda s, *a: False)):
             result = evaluate_trajectory(env, q_net, scenario, device="cpu", max_steps=10)
 
-        # Initial range is the first entry
-        assert abs(result["ranges"][0] - 2000.0) < 1e-6
+        # Initial 3D slant range is sqrt(2000^2 + 50^2)
+        expected_slant = np.sqrt(2000.0**2 + 50.0**2)
+        assert abs(result["ranges"][0] - expected_slant) < 1e-6
 
 
 # ---------------------------------------------------------------------------

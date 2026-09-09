@@ -32,6 +32,17 @@ except ImportError:
     from rl_training.utils.training_monitor import TrainingMonitor
 
 
+def set_seed(seed: int = 42):
+    """Set global random seeds across random, numpy, and torch for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
 def select_action(state, q_network, epsilon, action_dim, device):
     """Epsilon-greedy action selection."""
     if random.random() < epsilon:
@@ -82,6 +93,7 @@ def train_curriculum_phase(
     device: str = "cpu",
     load_from: str = None,
     reward_config: RewardConfig = None,
+    seed: int = None,
     # Individual reward params kept for backward compatibility
     firing_reward_high: float = None,
     time_penalty_factor: float = None,
@@ -98,6 +110,9 @@ def train_curriculum_phase(
     opportunity_cost_minimum: float = None,
 ):
     """Train DQN on a curriculum phase."""
+    if seed is not None:
+        set_seed(seed)
+
     device = torch.device(device)
 
     # Build RewardConfig from individual params if not provided as object
@@ -272,13 +287,39 @@ if __name__ == "__main__":
     parser.add_argument("--end_phase", type=int, default=3, help="Last curriculum phase to train (1-4)")
     parser.add_argument("--timesteps", type=int, default=10000, help="Total training timesteps per phase")
     parser.add_argument("--config", type=str, help="JSON config file for parameter overrides")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible training")
     args = parser.parse_args()
+
+    if args.seed is not None:
+        set_seed(args.seed)
 
     # Load config if provided
     config = {}
     if args.config:
         with open(args.config, 'r') as f:
-            config = json.load(f)
+            raw_config = json.load(f)
+            # If standard paper2_experiment.json format is used, flatten parameters
+            if "reward_function" in raw_config:
+                rf = raw_config["reward_function"]
+                fir = rf.get("firing_rewards", {})
+                hld = rf.get("hold_penalties", {})
+                ts = rf.get("time_and_safety", {})
+                ct = raw_config.get("curriculum_training", {})
+                config = {
+                    "firing_reward_high": fir.get("excellent", {}).get("reward", 100.0),
+                    "reward_excellent": fir.get("excellent", {}).get("reward", 100.0),
+                    "reward_good": fir.get("good", {}).get("reward", 80.0),
+                    "reward_minimum": fir.get("acceptable", {}).get("reward", 60.0),
+                    "reward_fair": fir.get("fair", {}).get("reward", 20.0),
+                    "reward_poor": 20.0,
+                    "reward_failure": fir.get("failure", {}).get("reward", -30.0),
+                    "time_penalty_factor": ts.get("progressive_time_penalty_factor", -100.0),
+                    "hold_penalty_high": hld.get("excellent", {}).get("penalty", -10.0),
+                    "eval_interval": ct.get("eval_interval", 100),
+                    "epsilon_decay_steps": ct.get("epsilon_decay_steps", 2000),
+                }
+            else:
+                config = raw_config
 
     prev_checkpoint = None
     for phase in range(args.start_phase, args.end_phase + 1):
@@ -305,7 +346,8 @@ if __name__ == "__main__":
             eval_interval=config.get("eval_interval", 100),
             epsilon_decay_steps=config.get("epsilon_decay_steps", 2000),
             reward_config=rc,
-            load_from=prev_checkpoint
+            load_from=prev_checkpoint,
+            seed=args.seed
         )
         prev_checkpoint = str(Path(__file__).parent.parent / "models" / "checkpoints" / f"dqn_curriculum_phase{phase}.pth")
 
