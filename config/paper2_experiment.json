@@ -11,8 +11,16 @@
     "dt_measurement_s": 0.5,
     "projectile_velocity_m_s": 800.0,
     "initial_target_z_m": 50.0,
-    "measurement_noise_std_m": [1.0, 1.0, 1.0],
-    "process_noise_std_m_s2": [0.1, 0.1, 0.1],
+    "measurement_noise_std_m": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "process_noise_std_m_s2": [
+      0.1,
+      0.1,
+      0.1
+    ],
     "simulated_hp_ramp": {
       "formula": "base_hp * (0.3 + 0.7 * min(1.0, t_elapsed / 5.0))",
       "ramp_time_constant_s": 5.0,
@@ -23,20 +31,90 @@
   "state_representation": {
     "state_dimension": 14,
     "features": [
-      {"index": 0, "symbol": "s0", "name": "Current estimated range (normalized)", "scale": "R_t / 5000.0"},
-      {"index": 1, "symbol": "s1", "name": "Initial estimated range (normalized)", "scale": "R_0 / 5000.0"},
-      {"index": 2, "symbol": "s2", "name": "Range-rate (normalized)", "scale": "R_dot / 100.0"},
-      {"index": 3, "symbol": "s3", "name": "Target length", "scale": "L_t (m)"},
-      {"index": 4, "symbol": "s4", "name": "Target width", "scale": "W_t (m)"},
-      {"index": 5, "symbol": "s5", "name": "Target height", "scale": "H_t (m)"},
-      {"index": 6, "symbol": "s6", "name": "Estimated velocity vx (normalized)", "scale": "v_x / 100.0"},
-      {"index": 7, "symbol": "s7", "name": "Estimated velocity vy (normalized)", "scale": "v_y / 100.0"},
-      {"index": 8, "symbol": "s8", "name": "Estimated velocity vz (normalized)", "scale": "v_z / 100.0"},
-      {"index": 9, "symbol": "s9", "name": "Normalized time remaining", "scale": "t_rem / T_max"},
-      {"index": 10, "symbol": "s10", "name": "Current hit probability", "scale": "p_hit in [0, 1]"},
-      {"index": 11, "symbol": "s11", "name": "Initial hit probability", "scale": "p_hit,0 in [0, 1]"},
-      {"index": 12, "symbol": "s12", "name": "Clamped Kalman covariance trace", "scale": "min(1.0, Tr(P_t) / 1000.0)"},
-      {"index": 13, "symbol": "s13", "name": "Target heading angle (normalized)", "scale": "psi_t / pi"}
+      {
+        "index": 0,
+        "symbol": "s1",
+        "name": "Current estimated range (normalized)",
+        "scale": "R_t / 5000.0"
+      },
+      {
+        "index": 1,
+        "symbol": "s2",
+        "name": "Range change from initial estimate (normalized)",
+        "scale": "(R_t - R_0) / 1000.0"
+      },
+      {
+        "index": 2,
+        "symbol": "s3",
+        "name": "Target length (normalized)",
+        "scale": "L_t / 20.0"
+      },
+      {
+        "index": 3,
+        "symbol": "s4",
+        "name": "Target width (normalized)",
+        "scale": "W_t / 20.0"
+      },
+      {
+        "index": 4,
+        "symbol": "s5",
+        "name": "Target height (normalized)",
+        "scale": "H_t / 20.0"
+      },
+      {
+        "index": 5,
+        "symbol": "s6",
+        "name": "Estimated x-velocity (affine normalized)",
+        "scale": "(v_x + 50) / 100.0"
+      },
+      {
+        "index": 6,
+        "symbol": "s7",
+        "name": "Estimated y-velocity (affine normalized)",
+        "scale": "(v_y + 50) / 100.0"
+      },
+      {
+        "index": 7,
+        "symbol": "s8",
+        "name": "Estimated z-velocity (affine normalized)",
+        "scale": "(v_z + 50) / 100.0"
+      },
+      {
+        "index": 8,
+        "symbol": "s9",
+        "name": "Estimated speed magnitude (normalized)",
+        "scale": "|v| / 100.0"
+      },
+      {
+        "index": 9,
+        "symbol": "s10",
+        "name": "Time remaining fraction",
+        "scale": "t_rem / T_max"
+      },
+      {
+        "index": 10,
+        "symbol": "s11",
+        "name": "Absolute elapsed steps (normalized)",
+        "scale": "episode_step / 100.0"
+      },
+      {
+        "index": 11,
+        "symbol": "s12",
+        "name": "Clamped Kalman covariance trace",
+        "scale": "min(1.0, Tr(P_t) / 1000.0)"
+      },
+      {
+        "index": 12,
+        "symbol": "s13",
+        "name": "Target heading angle (normalized to [-1,1])",
+        "scale": "psi_t / pi"
+      },
+      {
+        "index": 13,
+        "symbol": "s14",
+        "name": "Closure rate indicator (capped)",
+        "scale": "min(1.0, |R_dot| / 100.0)"
+      }
     ]
   },
   "action_space": {
@@ -47,27 +125,63 @@
     }
   },
   "network_architecture": {
-    "type": "Multi-Layer Perceptron (MLP)",
+    "type": "Multi-Layer Perceptron (MLP) -- Deep Q-Network",
     "input_dim": 14,
-    "hidden_layers": [128, 64, 32],
+    "hidden_layers": [
+      128,
+      128
+    ],
     "output_dim": 2,
-    "activations": ["ReLU", "ReLU", "ReLU", "Linear"],
+    "activations": [
+      "ReLU",
+      "ReLU",
+      "Linear"
+    ],
     "total_trainable_parameters": 18690,
-    "theoretical_flops": 37380
+    "theoretical_macs": 18432,
+    "theoretical_flops": 36864,
+    "note": "14-128-128-2 architecture; parameter count = 14*128+128 + 128*128+128 + 128*2+2 = 18690"
   },
   "reward_function": {
     "firing_rewards": {
-      "excellent": {"threshold": 0.70, "reward": 100.0},
-      "good": {"threshold": 0.60, "reward": 80.0},
-      "acceptable": {"threshold": 0.50, "reward": 60.0},
-      "fair": {"threshold": 0.45, "reward": 20.0},
-      "failure": {"threshold": 0.00, "reward": -30.0}
+      "excellent": {
+        "threshold": 0.7,
+        "reward": 100.0
+      },
+      "good": {
+        "threshold": 0.6,
+        "reward": 80.0
+      },
+      "acceptable": {
+        "threshold": 0.5,
+        "reward": 60.0
+      },
+      "fair": {
+        "threshold": 0.45,
+        "reward": 20.0
+      },
+      "failure": {
+        "threshold": 0.0,
+        "reward": -30.0
+      }
     },
     "hold_penalties": {
-      "excellent": {"threshold": 0.70, "penalty": -5.0},
-      "good": {"threshold": 0.60, "penalty": -2.0},
-      "acceptable": {"threshold": 0.50, "penalty": -0.5},
-      "shaping_below_acceptable": {"threshold": 0.00, "formula": "5.0 * (p_hit,t - p_hit,t-1) - 0.1"}
+      "excellent": {
+        "threshold": 0.7,
+        "penalty": -5.0
+      },
+      "good": {
+        "threshold": 0.6,
+        "penalty": -2.0
+      },
+      "acceptable": {
+        "threshold": 0.5,
+        "penalty": -0.5
+      },
+      "shaping_below_acceptable": {
+        "threshold": 0.0,
+        "formula": "5.0 * (p_hit,t - p_hit,t-1) - 0.1"
+      }
     },
     "time_and_safety": {
       "time_efficiency_bonus": 30.0,
@@ -82,77 +196,127 @@
       "plateau_hold_multiplier": 5.0,
       "plateau_fire_bonus": 50.0,
       "timeout_penalty": -40.0,
-      "timeout_high_hp_threshold": 0.60
+      "timeout_high_hp_threshold": 0.6
     }
   },
   "curriculum_training": {
     "total_phases": 4,
     "timesteps_per_phase": 10000,
-    "batch_size": 32,
-    "buffer_size": 50000,
+    "batch_size": 64,
+    "buffer_size": 20000,
     "gamma": 0.99,
-    "learning_rate": 0.0005,
-    "target_update_freq": 500,
-    "learning_starts": 1000,
+    "learning_rate": 0.001,
+    "target_update_freq": 200,
+    "learning_starts": 500,
+    "update_every_n_steps": 4,
     "epsilon_start": 1.0,
-    "epsilon_end": 0.01,
-    "epsilon_decay_steps": 2000,
+    "epsilon_end": 0.05,
+    "epsilon_decay_steps": 5000,
     "eval_interval": 100,
     "phase_mastery_criteria": {
-      "phase_1": {"avg_hp": 0.65, "min_hp": 0.60, "max_step_ratio": 0.40},
-      "phase_2": {"avg_hp": 0.55, "min_hp": 0.50, "max_step_ratio": 0.50},
-      "phase_3": {"avg_hp": 0.45, "min_hp": 0.40, "max_step_ratio": 0.60},
-      "phase_4": {"avg_hp": 0.50, "min_hp": 0.40, "max_step_ratio": 0.70}
+      "phase_1": {
+        "avg_hp": 0.7,
+        "min_hp_per_scenario": 0.6,
+        "max_fire_step": 35
+      },
+      "phase_2": {
+        "avg_hp": 0.65,
+        "min_hp_per_scenario": 0.55,
+        "max_fire_step": 35
+      },
+      "phase_3": {
+        "avg_hp": 0.6,
+        "min_hp_per_scenario": 0.5,
+        "max_fire_step": 35
+      },
+      "phase_4": {
+        "avg_hp": 0.55,
+        "min_hp_per_scenario": 0.4,
+        "max_fire_step": 35
+      }
     }
   },
   "evaluation_protocol": {
     "num_runs": 30,
-    "seeds": [0, 29],
+    "seeds": [
+      0,
+      29
+    ],
     "perturbations": {
-      "initial_range_pct": [-5.0, 5.0],
-      "target_velocity_pct": [-10.0, 10.0],
-      "measurement_noise_pct": [-20.0, 20.0]
+      "initial_range_pct": [
+        -5.0,
+        5.0
+      ],
+      "target_velocity_pct": [
+        -10.0,
+        10.0
+      ],
+      "measurement_noise_pct": [
+        -20.0,
+        20.0
+      ]
     },
     "test_scenarios": [
       {
-        "index": 0,
         "name": "Static_Close",
         "nominal_range_m": 800.0,
-        "velocity_m_s": [0.0, 0.0, 0.0],
+        "velocity_m_s": [
+          0.0,
+          0.0,
+          0.0
+        ],
         "motion_type": "stationary",
-        "episode_steps": 40
+        "tracking_duration_s": 10.0,
+        "episode_steps": 20,
+        "note": "episode_steps = tracking_duration_s / dt_measurement_s"
       },
       {
-        "index": 4,
         "name": "Fast_Approach_Long",
         "nominal_range_m": 3000.0,
-        "velocity_m_s": [-50.0, 0.0, 0.0],
+        "velocity_m_s": [
+          -50.0,
+          0.0,
+          0.0
+        ],
         "motion_type": "fast approaching",
-        "episode_steps": 25
+        "tracking_duration_s": 20.0,
+        "episode_steps": 40
       },
       {
-        "index": 6,
         "name": "Medium_Approach",
         "nominal_range_m": 2000.0,
-        "velocity_m_s": [-30.0, 0.0, 0.0],
+        "velocity_m_s": [
+          -30.0,
+          0.0,
+          0.0
+        ],
         "motion_type": "approaching",
-        "episode_steps": 40
+        "tracking_duration_s": 15.0,
+        "episode_steps": 30
       },
       {
-        "index": 11,
         "name": "Complex_3D_Motion",
         "nominal_range_m": 1800.0,
-        "velocity_m_s": [-25.0, 15.0, 8.0],
+        "velocity_m_s": [
+          15.0,
+          25.0,
+          8.0
+        ],
         "motion_type": "3D crossing",
-        "episode_steps": 40
+        "tracking_duration_s": 14.0,
+        "episode_steps": 28
       },
       {
-        "index": 13,
         "name": "ExtremeLong_Large_Lateral",
         "nominal_range_m": 3000.0,
-        "velocity_m_s": [0.0, 15.0, 0.0],
+        "velocity_m_s": [
+          0.0,
+          15.0,
+          0.0
+        ],
         "motion_type": "pure lateral",
-        "episode_steps": 90
+        "tracking_duration_s": 20.0,
+        "episode_steps": 40
       }
     ]
   },
